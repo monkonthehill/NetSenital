@@ -387,7 +387,7 @@ forms the basis for future anomaly detection and machine learning modules.
 
 -clone the repo and 
 ```
-g++ -g -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp -o simplesniffer -lpcap
+g++ -g -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp src/flow.cpp -o simplesniffer -lpcap
 ```
 ---
 
