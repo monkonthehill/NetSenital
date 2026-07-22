@@ -268,7 +268,88 @@ processPackets()
 
         └── Parse protocols
 ```
+---
+# Flow Tracking
 
+Modern Intrusion Detection Systems do not analyze packets independently.
+Instead, packets are grouped into **flows**, where a flow represents a
+single network conversation.
+
+A flow is uniquely identified by five fields:
+
+- Source IP
+- Destination IP
+- Source Port
+- Destination Port
+- Protocol
+
+These fields are stored inside a `FlowKey`.
+
+```cpp
+struct FlowKey
+{
+    std::string srcIp;
+    std::string dstIp;
+    uint16_t srcPort;
+    uint16_t dstPort;
+    uint8_t protocol;
+};
+```
+
+Each captured packet is first parsed into a `PacketInfo` structure.
+From this information a temporary `FlowKey` is generated.
+
+The flow tracker searches the current flow table:
+
+- If the key already exists, the packet counter for that flow is incremented.
+- Otherwise, a new flow is created and inserted into the table.
+
+```
+Packet
+
+   │
+
+   ▼
+
+PacketInfo
+
+   │
+
+   ▼
+
+FlowKey
+
+   │
+
+   ▼
+
+Flow Tracker
+
+   │
+
+ ┌─ Match ───────────────┐
+ │                       │
+ ▼                       ▼
+
+Update Statistics     Create New Flow
+```
+
+Currently every flow stores:
+
+- Flow identity (`FlowKey`)
+- Packet count
+
+Future versions will also maintain:
+
+- Byte count
+- Flow duration
+- TCP flags
+- Average packet size
+- Packet rate
+- Machine learning features
+
+Flow tracking is the first step toward stateful intrusion detection and
+forms the basis for future anomaly detection and machine learning modules.
 ---
 
 # Memory Layout
@@ -283,16 +364,31 @@ processPackets()
 - [x] Select capture device
 - [x] Open capture session
 - [x] Capture live packets
-- [x] Print packet payload
-- [ ] Hex dump
-- [ ] Ethernet parsing
-- [ ] IPv4 parsing
-- [ ] TCP parsing
-- [ ] UDP parsing
-- [ ] Flow tracking
+- [x] Hex dump
+- [x] Ethernet parsing
+- [x] IPv4 parsing
+- [x] TCP parsing
+- [x] UDP parsing
+- [x] ICMP parsing
+- [x] Unified `PacketInfo` representation
+- [x] FlowKey generation
+- [x] Flow tracking
+- [x] Packet counting per flow
+- [ ] Flow statistics (bytes, duration)
 - [ ] Feature extraction
-- [ ] Machine Learning integration
+- [ ] Detection engine
+- [ ] Machine learning integration
+- [ ] Prometheus metrics
+- [ ] Grafana dashboard
 
+
+---
+#Build
+
+-clone the repo and 
+```
+g++ -g -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp -o simplesniffer -lpcap
+```
 ---
 
 # References
@@ -301,4 +397,3 @@ processPackets()
 - Geeksforgeeks
 - TCP/IP Illustrated — W. Richard Stevens
 - Beej's Guide to Network Programming
->>>>>>> master

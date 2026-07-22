@@ -4,11 +4,64 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+
+#include "../include/flow.hpp"
+#include "../include/packet.hpp"
+#include "../include/parser.hpp"
+
 // struct pcap_pkthdr {
 // 	struct timeval ts;	/* time stamp */
 // 	bpf_u_int32 caplen;	/* length of portion present */
 // 	bpf_u_int32 len;	/* length of this packet (off wire) */
 // };
+
+// NOTES: THIS is the only function that prints parsed-layer info now.
+// Everything upstream (parseEthernet -> parseIPv4 -> parseTCP/parseUDP/
+// parseICMP) just fills in a PacketInfo and returns silently — see
+// packet.hpp and parser.cpp for why that split exists. `static` here
+// means this function is only visible inside this .cpp file — nothing
+// else needs to call it, so it doesn't need a header declaration.
+static void printPacketInfo(const PacketInfo& info)
+{
+    std::printf(
+        "[eth] %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x | etherType 0x%04x\n",
+        info.srcMac[0],
+        info.srcMac[1],
+        info.srcMac[2],
+        info.srcMac[3],
+        info.srcMac[4],
+        info.srcMac[5],
+        info.dstMac[0],
+        info.dstMac[1],
+        info.dstMac[2],
+        info.dstMac[3],
+        info.dstMac[4],
+        info.dstMac[5],
+        info.etherType);
+
+    if (!info.hasIPv4)
+    {
+        std::printf("[ip]  (not IPv4)\n");
+        return;
+    }
+
+    std::printf(
+        "[ip]  %s -> %s | protocol %u | ttl %u\n",
+        info.srcIp.c_str(),
+        info.dstIp.c_str(),
+        info.protocol,
+        info.ttl);
+
+    if (info.hasTransport)
+    {
+        std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+    }
+
+    if (info.hasICMP)
+    {
+        std::printf("[icmp] type %u | code %u\n", info.icmpType, info.icmpCode);
+    }
+}
 
 void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char* packet)
 {
@@ -20,7 +73,32 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     int i = 0, *counter = reinterpret_cast<int*>(arg);
 
     std::printf("Packet count : %d\n", ++(*counter));
-      std::printf("Packet length : %d\n", pkthdr->len);
+    std::printf("Packet length : %d\n", pkthdr->len);
+
+    // NOTES: this is the actual refactor. Before: parseEthernet() would
+    // have printed as it went. Now: it fills `info` and returns silently,
+    // and printPacketInfo() is the one deliberate place we look at the
+    // result. `info` is fresh (all has* flags false) for every packet.
+    PacketInfo info;
+    parseEthernet(packet, static_cast<int>(pkthdr->caplen), info);
+    printPacketInfo(info);
+    // NOTES: after parsing the packet into PacketInfo, we derive a FlowKey
+    // (src/dst IP, ports, protocol) that uniquely identifies a network flow.
+    // createFlows() searches the existing flow table: if a matching FlowKey is
+    // found, it increments that flow's packet counter; otherwise it creates a
+    // new Flow and stores it in the global flow list. This lays the foundation
+    // for maintaining per-flow statistics instead of treating every packet
+    // independently.
+    FlowKey newKey = makeFlowKey(info);
+    createFlows(newKey);
+    // NOTES: printFlows() is a temporary debugging aid. After each packet is
+    // processed, it displays the current flow table so we can verify that
+    // packets belonging to the same flow increase the packet counter instead
+    // of creating duplicate Flow entries. This can be removed or replaced by
+    // proper logging once flow tracking is verified.
+    printFlows();
+    // NOTES: this raw hex/ASCII payload dump is untouched — it's separate
+    // from the layered parser and wasn't part of this task's scope.
     std::printf("Payload:\n");
     for (int i = 0; i < pkthdr->caplen; ++i)
     {
@@ -106,6 +184,10 @@ int main()
         pcap_freealldevs(alldevs);
         return 1;
     }
+
+    int linktype = pcap_datalink(descr);
+    std::printf("Link-layer type: %s\n", pcap_datalink_val_to_name(linktype));
+
     int result = pcap_loop(descr, -1, processPackets, reinterpret_cast<u_char*>(&count));
     if (result == PCAP_ERROR)
     {
