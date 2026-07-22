@@ -192,6 +192,29 @@ is equivalent to
 ```
 
 ---
+# Understanding the Ethernet Headers
+
+![Ethernet Headers](./images/IEEE-802.3-Ethernet-Frame-Format.png)
+
+- First 7 bytes are reserved for preamble 
+    A preamble is used for establishment of bit synchronization and was used in old systems. It was introduced to allow for the loss of few bits due to signal delay
+
+- Next one byte is used for Start of frame delimiter
+    This is a 1-Byte field that is always set to 10101011. SFD indicates that upcoming bits are starting the frame, which is the destination address.
+
+- Next 6 bytes are designation address 
+    This contain MAC address of machine for which the data is destined.
+
+- Lenght is the next 2 byte field 
+    It indicate the lenght of the whole frame.
+
+- Data 
+    Next the actual data is placed which is also known as  a payload.
+
+- Cyclic Redundancy Check (CRC)
+    CRC is 4 Byte field. This field contains a 32-bits hash code of data, which is generated over the Destination Address, Source Address, Length, and Data field. If the checksum computed by
+
+---
 
 # Packet Header
 
@@ -272,20 +295,10 @@ processPackets()
 
 ---
 
-# Build
-
-```bash
-mkdir build
-cd build
-cmake ..
-make
-```
-
----
-
 # References
 
 - libpcap Documentation
+- Geeksforgeeks
 - TCP/IP Illustrated — W. Richard Stevens
 - Beej's Guide to Network Programming
 >>>>>>> master
