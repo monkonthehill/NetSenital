@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,10 @@ struct Flow
 {
     FlowKey key;
     int packet_counter = 0;
+    int pack_len;
+    time_t first_seen;
+    time_t last_seen;
+    std::uint64_t total_bytes = 0;
 };
 
 struct FlowKeyHash
@@ -43,9 +48,8 @@ struct FlowKeyHash
     }
 };
 
-FlowKey
-makeFlowKey(const PacketInfo& info);
+FlowKey makeFlowKey(const PacketInfo& info);
 
-void createFlows(const FlowKey& key);
+void createFlows(const FlowKey& key , int pack_len , time_t arrival_time);
 
 void printFlows();

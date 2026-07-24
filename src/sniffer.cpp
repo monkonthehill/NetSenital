@@ -1,9 +1,13 @@
 #include "../include/sniffer.hpp"
 
 #include <cctype>
+#include <chrono>  // Added for UI refresh timing
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <iostream>
+
+#include <time.h>
 
 #include "../include/flow.hpp"
 #include "../include/packet.hpp"
@@ -63,6 +67,84 @@ static void printPacketInfo(const PacketInfo& info)
     }
 }
 
+// --- LIVE REFRESH THROTTLING ---
+// NOTES: this used to be a function-local `static` declared inside
+// processPackets(). Moved to file scope because it's shared between two
+// call sites: the packet-arrival path (processPackets, below) and the
+// capture-timeout path (main.cpp's pcap_next_ex loop). Both need to
+// check/update the SAME clock — see maybeRefreshDisplay() for why. Kept
+// as file-scope `static` (internal linkage) rather than exposed in the
+// header, since only maybeRefreshDisplay() in this file needs to touch it
+// directly — main.cpp only ever calls maybeRefreshDisplay(), never this
+// variable itself.
+static auto last_ui_update = std::chrono::steady_clock::now();
+
+// Refresh interval in milliseconds. Was fixed at 1000ms (1 update/sec)
+// via duration_cast<seconds>, which meant "faster than 1/sec" was
+// impossible no matter what number you put there. Switched to
+// milliseconds so this one constant controls the whole thing:
+//   200  -> 5 updates/sec
+//   100  -> 10 updates/sec
+//   50   -> 20 updates/sec (screen-clear/redraw cost starts to show)
+constexpr auto UI_REFRESH_INTERVAL_MS = std::chrono::milliseconds(200);
+
+// NOTES: this is the actual fix for the "freezes for several seconds then
+// dumps everything" symptom. Previously this throttle check only ever ran
+// inside processPackets(), which pcap_loop() only called when a packet had
+// actually arrived. On bursty/quiet traffic (e.g. occasional localhost DNS
+// lookups with several seconds of silence between them), nothing was ever
+// polling the clock during those quiet gaps, so the screen just sat
+// exactly as it was — however long the gap happened to be — even though
+// flow tracking (createFlows) kept working correctly the whole time. The
+// moment a new packet finally arrived, this check would see that way more
+// than one interval had elapsed and dump everything that had silently
+// piled up in `flows` in one go. That's not a hang, it's a display that
+// could only ever be triggered by traffic.
+//
+// This is declared WITHOUT `static` (external linkage) and forward
+// declared in sniffer.hpp specifically so main.cpp's pcap_next_ex loop can
+// also call it on the capture-timeout path (hasPacket == false, nothing
+// new arrived, but the flow table can still refresh on schedule) — driving
+// the same clock as the packet-arrival path (hasPacket == true, real
+// counter/length/info to show), so the display now ticks steadily
+// regardless of whether traffic is flowing.
+void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const PacketInfo* info)
+{
+    auto now = std::chrono::steady_clock::now();
+
+    if (now - last_ui_update < UI_REFRESH_INTERVAL_MS)
+    {
+        return;
+    }
+
+    // Clear the terminal screen and move cursor to home position before redrawing
+    std::cout << "\033[2J\033[H" << std::flush;
+
+    // NOTES: printFlows() is a temporary debugging aid. It displays the
+    // current flow table so we can verify that packets belonging to the
+    // same flow increase the packet counter instead of creating duplicate
+    // Flow entries. Fires on every scheduled tick (packet-driven or
+    // timeout-driven), not just "after each packet is processed" like the
+    // original note said — see the NOTES above this function for why that
+    // distinction matters. This can be removed or replaced by proper
+    // logging once flow tracking is verified.
+    printFlows();
+
+    std::printf("Packet count : %d\n", counterValue);
+
+    if (hasPacket && info != nullptr)
+    {
+        std::printf("Packet length : %d\n", packetLen);
+
+        printPacketInfo(*info);
+    }
+
+    // Flush output stream to avoid terminal rendering delays
+    std::cout << std::flush;
+
+    last_ui_update = now;
+}
+
 void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char* packet)
 {
     //*packet stores the adress of the first byte of contiguous block of bytes.
@@ -70,10 +152,16 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // reinterpret_cast is preferred because it makes the conversion explicit.
     // C-style casts can perform multiple kinds of casts implicitly, making
     // code harder to understand and potentially less safe.
+    time_t arrival_time = pkthdr->ts.tv_sec;
+
+
     int i = 0, *counter = reinterpret_cast<int*>(arg);
 
-    std::printf("Packet count : %d\n", ++(*counter));
-    std::printf("Packet length : %d\n", pkthdr->len);
+    // Track statistics and parse incoming data silently
+    ++(*counter);
+
+    // time_t packet_time = pkthdr->ts.tv_sec;
+    // std::printf("Packet timestamp : %d\n",(int)packet_time);
 
     // NOTES: this is the actual refactor. Before: parseEthernet() would
     // have printed as it went. Now: it fills `info` and returns silently,
@@ -81,7 +169,8 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // result. `info` is fresh (all has* flags false) for every packet.
     PacketInfo info;
     parseEthernet(packet, static_cast<int>(pkthdr->caplen), info);
-    printPacketInfo(info);
+
+
     // NOTES: after parsing the packet into PacketInfo, we derive a FlowKey
     // (src/dst IP, ports, protocol) that uniquely identifies a network flow.
     // createFlows() searches the existing flow table: if a matching FlowKey is
@@ -89,31 +178,22 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // new Flow and stores it in the global flow list. This lays the foundation
     // for maintaining per-flow statistics instead of treating every packet
     // independently.
-    FlowKey newKey = makeFlowKey(info);
-    createFlows(newKey);
-    // NOTES: printFlows() is a temporary debugging aid. After each packet is
-    // processed, it displays the current flow table so we can verify that
-    // packets belonging to the same flow increase the packet counter instead
-    // of creating duplicate Flow entries. This can be removed or replaced by
-    // proper logging once flow tracking is verified.
-    printFlows();
-    // NOTES: this raw hex/ASCII payload dump is untouched — it's separate
-    // from the layered parser and wasn't part of this task's scope.
-    std::printf("Payload:\n");
-    for (int i = 0; i < pkthdr->caplen; ++i)
+    if (info.hasIPv4 && info.hasTransport)
     {
-        if (isprint(packet[i]))
-        {
-            std::printf("%c", packet[i]);
-        }
-        else
-        {
-            std::printf(". ");
-        }
-        if ((i % 16 == 0 && i != 0) || i == pkthdr->caplen - 1)
-        {
-            std::printf("\n");
-        }
+
+        FlowKey newKey = makeFlowKey(info);
+
+
+        createFlows(newKey, pkthdr->len, arrival_time);
+
+        // NOTES: throttling itself lives in maybeRefreshDisplay() at file
+        // scope, shared with main.cpp's capture-timeout path — see the
+        // NOTES above that function and above last_ui_update for why this
+        // moved out of an inline check.
+        maybeRefreshDisplay(/*hasPacket=*/true, *counter, pkthdr->len, &info);
+
+        // NOTES: this raw hex/ASCII payload dump is untouched — it's separate
+        // from the layered parser and wasn't part of this task's scope.
     }
     return;
 }
@@ -142,61 +222,4 @@ pcap_if_t* selectNodeByIndex(pcap_if_t* head, int targetIndex)
 
     // 3. Return nullptr if targetIndex is larger than the list size
     return nullptr;
-}
-
-int main()
-{
-    int count          = 0;
-    int index          = 1;
-    int devIndex       = 0;
-    pcap_t* descr      = nullptr;
-    pcap_if_t* alldevs = nullptr;
-    /* pcap_t is an opaque struct representing one active capture session. You never access its fields directly — you only interact with it by passing a pcap_t * to pcap's functions, which use it to both configure the session (filters, buffer settings) and drive it (start capturing, get stats, close). The packet data itself doesn't come from pcap_t — it arrives separately, through the callback's own parameters, each time a packet is captured. */
-    char errbuf[PCAP_ERRBUF_SIZE];
-    std::memset(errbuf, 0, PCAP_ERRBUF_SIZE);
-
-    if (pcap_findalldevs(&alldevs, errbuf) == -1)
-    {
-        std::cerr << errbuf << '\n';
-    }
-    for (pcap_if_t* d = alldevs; d != nullptr; d = d->next)
-    {
-        std::cout << index << "). " << d->name << '\n';
-        std::cout << (d->description ? d->description : "(no description)") << '\n';
-        index++;
-    }
-    std::cout << "Enter the index of device you want to moniter : \n";
-    std::cin >> devIndex;
-    pcap_if_t* selectedDev = selectNodeByIndex(alldevs, devIndex - 1);
-    if (selectedDev == nullptr)
-    {
-        std::cerr << "Invalid device.\n";
-        pcap_freealldevs(alldevs);
-        return 1;
-    };
-    std::cout << "Opening device: " << selectedDev->name
-              << '\n';  // (also fixes the pointer-print bug from before)
-
-    descr = pcap_open_live(selectedDev->name, MAXBYTES2CAPTURE, 1, 512, errbuf);
-    if (descr == nullptr)
-    {
-        std::cerr << "pcap_open_live failed: " << errbuf << '\n';
-        pcap_freealldevs(alldevs);
-        return 1;
-    }
-
-    int linktype = pcap_datalink(descr);
-    std::printf("Link-layer type: %s\n", pcap_datalink_val_to_name(linktype));
-
-    int result = pcap_loop(descr, -1, processPackets, reinterpret_cast<u_char*>(&count));
-    if (result == PCAP_ERROR)
-    {
-        std::cerr << "pcap_loop failed: " << pcap_geterr(descr) << '\n';
-    }
-    else if (result == PCAP_ERROR_BREAK)
-    {
-        std::cerr << "pcap_loop was interrupted (pcap_breakloop called)\n";
-    }
-    pcap_freealldevs(alldevs);  // free only after you're done reading from it
-    return 0;
 }
