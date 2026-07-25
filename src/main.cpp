@@ -20,9 +20,7 @@ int main()
     // Disable buffering so the dashboard updates immediately.
     std::cout << std::flush;
 
-    //------------------------------------------------------------
     // Enumerate available capture devices
-    //------------------------------------------------------------
     if (pcap_findalldevs(&allDevices, errbuf) == -1)
     {
         std::cerr << errbuf << '\n';
@@ -49,9 +47,7 @@ int main()
 
     std::cout << "\nOpening device: " << selectedDevice->name << '\n';
 
-    //------------------------------------------------------------
     // Open capture session
-    //------------------------------------------------------------
     captureHandle = pcap_open_live(
         selectedDevice->name,
         MAXBYTES2CAPTURE,
@@ -73,7 +69,6 @@ int main()
     // Clear terminal before the live dashboard starts.
     std::cout << "\033[H";
 
-    //------------------------------------------------------------
     // Manual capture loop
     //
     // We intentionally use pcap_next_ex() instead of pcap_loop().
@@ -85,7 +80,6 @@ int main()
     // pcap_next_ex() respects the read timeout and returns 0 when
     // no packets arrive, allowing us to perform periodic tasks
     // without relying on incoming traffic.
-    //------------------------------------------------------------
 
     struct pcap_pkthdr* packetHeader = nullptr;
     const u_char* packetData         = nullptr;
@@ -138,9 +132,7 @@ int main()
         }
     }
 
-    //------------------------------------------------------------
     // Cleanup
-    //------------------------------------------------------------
 
     if (captureResult == PCAP_ERROR)
     {

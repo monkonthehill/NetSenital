@@ -152,7 +152,7 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // reinterpret_cast is preferred because it makes the conversion explicit.
     // C-style casts can perform multiple kinds of casts implicitly, making
     // code harder to understand and potentially less safe.
-    time_t arrival_time = pkthdr->ts.tv_sec;
+const timeval& arrival_time = pkthdr->ts;
 
 
     int i = 0, *counter = reinterpret_cast<int*>(arg);
@@ -195,6 +195,7 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
         // NOTES: this raw hex/ASCII payload dump is untouched — it's separate
         // from the layered parser and wasn't part of this task's scope.
     }
+    delete_flow(flows);
     return;
 }
 
