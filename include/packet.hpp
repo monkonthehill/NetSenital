@@ -38,8 +38,8 @@ struct PacketInfo
     // from "this layer was never reached." Every optional layer below
     // follows the same has-flag pattern.
     bool        hasIPv4 = false;
-    std::string srcIp;
-    std::string dstIp;
+    uint32_t srcIp;
+    uint32_t dstIp;
     uint8_t     protocol = 0;   // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP...)
     uint8_t     ttl = 0;
 

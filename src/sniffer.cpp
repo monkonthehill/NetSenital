@@ -48,13 +48,19 @@ static void printPacketInfo(const PacketInfo& info)
         std::printf("[ip]  (not IPv4)\n");
         return;
     }
+    //converted unsigned int 32 into string so that printing is  reliable
 
-    std::printf(
-        "[ip]  %s -> %s | protocol %u | ttl %u\n",
-        info.srcIp.c_str(),
-        info.dstIp.c_str(),
-        info.protocol,
-        info.ttl);
+    in_addr srcAddr, dstAddr;
+    srcAddr.s_addr = htonl(info.srcIp);
+    dstAddr.s_addr = htonl(info.dstIp);
+
+    char src[INET_ADDRSTRLEN];
+    char dst[INET_ADDRSTRLEN];
+
+    inet_ntop(AF_INET, &srcAddr, src, sizeof(src));
+    inet_ntop(AF_INET, &dstAddr, dst, sizeof(dst));
+
+    std::printf("[ip]  %s -> %s | protocol %u | ttl %u\n", src, dst, info.protocol, info.ttl);
 
     if (info.hasTransport)
     {
@@ -152,7 +158,7 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // reinterpret_cast is preferred because it makes the conversion explicit.
     // C-style casts can perform multiple kinds of casts implicitly, making
     // code harder to understand and potentially less safe.
-const timeval& arrival_time = pkthdr->ts;
+    const timeval& arrival_time = pkthdr->ts;
 
 
     int i = 0, *counter = reinterpret_cast<int*>(arg);

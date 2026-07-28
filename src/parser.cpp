@@ -1,13 +1,16 @@
 #include "../include/parser.hpp"
-#include "../include/packet.hpp"
+
+#include <cstring>
 
 #include <arpa/inet.h>
-#include <cstring>
 #include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+#include <sys/types.h>
+
+#include "../include/packet.hpp"
 
 void parseEthernet(const u_char* packet, int caplen, PacketInfo& info)
 {
@@ -30,7 +33,7 @@ void parseEthernet(const u_char* packet, int caplen, PacketInfo& info)
     // storing the WRONG (un-converted) value would be just as broken
     // in a struct field as it would in a printed number.
     uint16_t etherType = ntohs(eth->ether_type);
-    info.etherType = etherType;
+    info.etherType     = etherType;
 
     // NOTES: CRUX — the "EtherType?" decision point, same role as
     // before. The only thing that changed is what happens in each
@@ -38,9 +41,10 @@ void parseEthernet(const u_char* packet, int caplen, PacketInfo& info)
     switch (etherType)
     {
         case ETHERTYPE_IP:
-            parseIPv4(packet + sizeof(struct ether_header),
-                      caplen - static_cast<int>(sizeof(struct ether_header)),
-                      info);
+            parseIPv4(
+                packet + sizeof(struct ether_header),
+                caplen - static_cast<int>(sizeof(struct ether_header)),
+                info);
             break;
 
         default:
@@ -69,21 +73,21 @@ void parseIPv4(const u_char* packet, int caplen, PacketInfo& info)
         return;
     }
 
-    char srcIp[INET_ADDRSTRLEN];
-    char dstIp[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(iph->ip_src), srcIp, sizeof(srcIp));
-    inet_ntop(AF_INET, &(iph->ip_dst), dstIp, sizeof(dstIp));
+    u_int32_t srcIp /* [INET_ADDRSTRLEN] */;
+    u_int32_t dstIp /* [INET_ADDRSTRLEN] */;
+    info.srcIp = ntohl(iph->ip_src.s_addr);
+    info.dstIp = ntohl(iph->ip_dst.s_addr);
 
     // NOTES: hasIPv4 = true is what tells printPacketInfo() later that
     // these fields are real and not just zero-initialized defaults.
     info.hasIPv4  = true;
-    info.srcIp    = srcIp;   //  copy from the char buffer
+    info.srcIp    = srcIp;  
     info.dstIp    = dstIp;
     info.protocol = iph->ip_p;
     info.ttl      = iph->ip_ttl;
 
     const u_char* transportSegment = packet + ipHeaderLen;
-    int remaining = caplen - ipHeaderLen;
+    int remaining                  = caplen - ipHeaderLen;
 
     // NOTES: CRUX — the "Protocol?" decision point, same role as
     // before. ip_p is a single byte, so still no ntohs() needed here.
@@ -116,8 +120,8 @@ void parseTCP(const u_char* packet, int caplen, PacketInfo& info)
     const struct tcphdr* tcph = reinterpret_cast<const struct tcphdr*>(packet);
 
     info.hasTransport = true;
-    info.srcPort = ntohs(tcph->source);
-    info.dstPort = ntohs(tcph->dest);
+    info.srcPort      = ntohs(tcph->source);
+    info.dstPort      = ntohs(tcph->dest);
 
     // NOTES: SCOPE NOTE — TCP flags (SYN/ACK/FIN...) aren't in
     // PacketInfo yet. The task's target field list didn't ask for
@@ -136,8 +140,8 @@ void parseUDP(const u_char* packet, int caplen, PacketInfo& info)
     const struct udphdr* udph = reinterpret_cast<const struct udphdr*>(packet);
 
     info.hasTransport = true;
-    info.srcPort = ntohs(udph->source);
-    info.dstPort = ntohs(udph->dest);
+    info.srcPort      = ntohs(udph->source);
+    info.dstPort      = ntohs(udph->dest);
 }
 
 void parseICMP(const u_char* packet, int caplen, PacketInfo& info)
