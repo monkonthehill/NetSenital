@@ -77,7 +77,7 @@ void parseIPv4(const u_char* packet, int caplen, PacketInfo& info)
     // NOTES: hasIPv4 = true is what tells printPacketInfo() later that
     // these fields are real and not just zero-initialized defaults.
     info.hasIPv4  = true;
-    info.srcIp    = srcIp;   // std::string copy from the char buffer
+    info.srcIp    = srcIp;   //  copy from the char buffer
     info.dstIp    = dstIp;
     info.protocol = iph->ip_p;
     info.ttl      = iph->ip_ttl;
