@@ -26,8 +26,8 @@ struct PacketInfo
 {
     // --- Ethernet layer --- filled whenever the frame is long enough
     // to contain an Ethernet header at all.
-    uint8_t  srcMac[6] = {0};
-    uint8_t  dstMac[6] = {0};
+    uint8_t srcMac[6]  = {0};
+    uint8_t dstMac[6]  = {0};
     uint16_t etherType = 0;
 
     // --- IPv4 layer ---
@@ -37,20 +37,30 @@ struct PacketInfo
     // defaults with no way to tell "this is genuinely empty" apart
     // from "this layer was never reached." Every optional layer below
     // follows the same has-flag pattern.
-    bool        hasIPv4 = false;
+    bool hasIPv4 = false;
     uint32_t srcIp;
     uint32_t dstIp;
-    uint8_t     protocol = 0;   // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP...)
-    uint8_t     ttl = 0;
+    uint8_t protocol = 0;  // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP...)
+    uint8_t ttl      = 0;
 
     // --- Transport layer --- ports  you show me your PacketInfo struonly, shared by TCP and UDP.
     // `protocol` above already tells you which one it was.
-    bool     hasTransport = false;
-    uint16_t srcPort = 0;
-    uint16_t dstPort = 0;
+    bool hasTransport = false;
+    uint16_t srcPort  = 0;
+    uint16_t dstPort  = 0;
 
     // --- ICMP ---
-    bool    hasICMP = false;
+    bool hasICMP     = false;
     uint8_t icmpType = 0;
     uint8_t icmpCode = 0;
+
+    //---Ipv6---
+    bool hasIPv6 = false;
+    uint8_t srcIp6[16];
+    uint8_t dstIp6[16];
+
+    // --- ICMP ---
+
+    bool hasICMPv6 = false;
 };
+

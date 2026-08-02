@@ -2,11 +2,15 @@
 
 #include <cctype>
 #include <chrono>  // Added for UI refresh timing
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <iostream>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <time.h>
 
 #include "../include/flow.hpp"
@@ -43,33 +47,63 @@ static void printPacketInfo(const PacketInfo& info)
         info.dstMac[5],
         info.etherType);
 
-    if (!info.hasIPv4)
+    if (!info.hasIPv4 && !info.hasIPv6)
     {
-        std::printf("[ip]  (not IPv4)\n");
+        std::printf("(nor IPv6 neither IPv4 !!)\n");
         return;
     }
-    //converted unsigned int 32 into string so that printing is  reliable
 
-    in_addr srcAddr, dstAddr;
-    srcAddr.s_addr = htonl(info.srcIp);
-    dstAddr.s_addr = htonl(info.dstIp);
-
-    char src[INET_ADDRSTRLEN];
-    char dst[INET_ADDRSTRLEN];
-
-    inet_ntop(AF_INET, &srcAddr, src, sizeof(src));
-    inet_ntop(AF_INET, &dstAddr, dst, sizeof(dst));
-
-    std::printf("[ip]  %s -> %s | protocol %u | ttl %u\n", src, dst, info.protocol, info.ttl);
-
-    if (info.hasTransport)
+    if (info.hasIPv6)
     {
-        std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+        std::printf("(is IPv6)\n");
+
+        char src6[INET6_ADDRSTRLEN];
+        char dst6[INET6_ADDRSTRLEN];
+
+        inet_ntop(AF_INET6, info.srcIp6, src6, sizeof(src6));
+        inet_ntop(AF_INET6, info.dstIp6, dst6, sizeof(dst6));
+
+        std::printf("[ip]  %s -> %s | protocol %u | ttl %u\n", src6, dst6, info.protocol, info.ttl);
+
+        if (info.hasTransport)
+        {
+            std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+        }
+
+        if (info.hasICMPv6)
+        {
+            std::printf("[icmp] type %u | code %u\n", info.icmpType, info.icmpCode);
+        }
+        return;
     }
 
-    if (info.hasICMP)
+    if (info.hasIPv4)
     {
-        std::printf("[icmp] type %u | code %u\n", info.icmpType, info.icmpCode);
+        std::printf("(is IPv4)\n");
+        //converted unsigned int 32 into string so that printing is  reliable
+
+        in_addr srcAddr, dstAddr;
+        srcAddr.s_addr = htonl(info.srcIp);
+        dstAddr.s_addr = htonl(info.dstIp);
+
+        char src[INET_ADDRSTRLEN];
+        char dst[INET_ADDRSTRLEN];
+
+        inet_ntop(AF_INET, &srcAddr, src, sizeof(src));
+        inet_ntop(AF_INET, &dstAddr, dst, sizeof(dst));
+
+        std::printf("[ip]  %s -> %s | protocol %u | ttl %u\n", src, dst, info.protocol, info.ttl);
+
+        if (info.hasTransport)
+        {
+            std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+        }
+
+        if (info.hasICMP)
+        {
+            std::printf("[icmp] type %u | code %u\n", info.icmpType, info.icmpCode);
+        }
+        return;
     }
 }
 
@@ -83,6 +117,7 @@ static void printPacketInfo(const PacketInfo& info)
 // header, since only maybeRefreshDisplay() in this file needs to touch it
 // directly — main.cpp only ever calls maybeRefreshDisplay(), never this
 // variable itself.
+
 static auto last_ui_update = std::chrono::steady_clock::now();
 
 // Refresh interval in milliseconds. Was fixed at 1000ms (1 update/sec)
@@ -164,6 +199,7 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     int i = 0, *counter = reinterpret_cast<int*>(arg);
 
     // Track statistics and parse incoming data silently
+
     ++(*counter);
 
     // time_t packet_time = pkthdr->ts.tv_sec;
