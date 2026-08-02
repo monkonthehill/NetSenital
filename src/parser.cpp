@@ -46,8 +46,8 @@ void parseEthernet(const u_char* packet, int caplen, PacketInfo& info)
     // storing the WRONG (un-converted) value would be just as broken
     // in a struct field as it would in a printed number.
     uint16_t etherType = ntohs(eth->ether_type);
-//
-    info.etherType     = etherType;
+    //
+    info.etherType = etherType;
 
     // NOTES: CRUX — the "EtherType?" decision point, same role as
     // before. The only thing that changed is what happens in each
@@ -107,7 +107,7 @@ void parseIPv4(const u_char* packet, int caplen, PacketInfo& info)
     // NOTES: hasIPv4 = true is what tells printPacketInfo() later that
     // these fields are real and not just zero-initialized defaults.
     info.hasIPv4  = true;
-    info.srcIp    = srcIp;  
+    info.srcIp    = srcIp;
     info.dstIp    = dstIp;
     info.protocol = iph->ip_p;
     info.ttl      = iph->ip_ttl;
@@ -218,9 +218,9 @@ void parseTCP(const u_char* packet, int caplen, PacketInfo& info)
     }
 
     const struct tcphdr* tcph = reinterpret_cast<const struct tcphdr*>(packet);
-info.hasTransport = true;
-    info.srcPort      = ntohs(tcph->source);
-    info.dstPort      = ntohs(tcph->dest);
+    info.hasTransport         = true;
+    info.srcPort              = ntohs(tcph->source);
+    info.dstPort              = ntohs(tcph->dest);
 
     // NOTES: SCOPE NOTE — TCP flags (SYN/ACK/FIN...) aren't in
     // PacketInfo yet. The task's target field list didn't ask for

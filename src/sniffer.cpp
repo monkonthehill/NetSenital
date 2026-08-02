@@ -183,7 +183,7 @@ void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const 
     // Flush output stream to avoid terminal rendering delays
     std::cout << std::flush;
 
-    last_ui_update = now;
+   last_ui_update = now;
 }
 
 void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char* packet)
@@ -220,7 +220,7 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // new Flow and stores it in the global flow list. This lays the foundation
     // for maintaining per-flow statistics instead of treating every packet
     // independently.
-    if (info.hasIPv4 && info.hasTransport)
+    if ((info.hasIPv4 || info.hasIPv6) && info.hasTransport)
     {
 
         FlowKey newKey = makeFlowKey(info);
