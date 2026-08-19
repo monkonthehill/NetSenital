@@ -106,14 +106,14 @@ brew install libpcap
 ### Build
 
 ```bash
-g++ -g -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp src/extractor.cpp -o netsent -lpcap
+g++ -g -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp src/extractor.cpp -o netsentinal -lpcap
 ```
 
 ### Run
 
 ```bash
 # List available network interfaces
-sudo ./netsent
+sudo ./netsentinal
 
 # Capture from a specific interface (example: eth0)
 sudo ./netsent eth0
