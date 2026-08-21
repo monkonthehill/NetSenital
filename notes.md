@@ -64,12 +64,42 @@ This document summarizes the architectural updates, bug fixes, performance optim
 
 ---
 
-## 5. Verification & Testing
+## 5. Rate Flooring, Timestamps, IP Export & TCP Flag Additions
 
-- Compiled with strict flags: `g++ -g -Wall -Wextra -Wshadow ... -lpcap` with **0 errors and 0 warnings**.
+1. **Elimination of `inf` / Zero-Duration Division**:
+   - Rate calculations for PPS and BPS in `extractor.cpp` and `flow.cpp` now floor the denominator using `constexpr double MIN_DURATION_SEC = 0.001;` (1ms floor):
+     ```cpp
+     double rateDuration = std::max(duration, MIN_DURATION_SEC);
+     double packetsPerSecond = packets / rateDuration;
+     double bytesPerSecond   = bytes   / rateDuration;
+     ```
+   - Flow `duration` itself remains exact; only rate denominators are protected against division-by-zero.
+
+2. **Flow Start Timestamp (`startTimeUnixMs`)**:
+   - Extracted Unix epoch millisecond timestamp from libpcap's `timeval` on initial packet arrival:
+     ```cpp
+     flow.startTimeUnixMs = static_cast<uint64_t>(arrival_time.tv_sec) * 1000 + arrival_time.tv_usec / 1000;
+     ```
+   - Persisted across `Flow`, `FlowFeatures`, and exported as the leading column in `Data/packet_data.csv`.
+
+3. **Source & Destination IP Address String Export**:
+   - Added `ipToString(uint32_t)` along with `getSrcIpStr(const FlowKey&)` and `getDstIpStr(const FlowKey&)` supporting both IPv4 (dotted-decimal) and IPv6 (standard hex-colon) formatting via `inet_ntop`.
+   - Added `srcIp` and `dstIp` columns to `FlowFeatures` and CSV exports.
+
+4. **TCP Flag Counters & Inspection**:
+   - Extracted raw TCP flags (`packet[13]`) in `parseTCP()`.
+   - Tracked cumulative counts for `synCount`, `ackCount`, `finCount`, `rstCount`, `pshCount`, and `urgCount` per flow.
+   - Propagated flags to live console logging (`[l4] port -> port [flags: SYN ACK ...]`), dashboard statistics, and CSV dataset columns.
+
+---
+
+## 6. Verification & Testing
+
+- Compiled with strict flags: `g++ -O2 -Wall -Wextra -Wshadow ... -lpcap` with **0 errors and 0 warnings**.
 - Executed automated unit tests covering:
-  - IPv4 `FlowKey` equality and hashing.
-  - IPv6 `FlowKey` equality and hashing.
-  - Cross-family distinction (IPv4 vs IPv6 with identical ports/protocol).
-  - Port-scan collision avoidance (1000 sequential ports -> 1000 unique hashes).
-  - Flow duration and byte/packet counters accumulation.
+  - IPv4 `FlowKey` equality, hashing, and dotted-decimal formatting.
+  - IPv6 `FlowKey` equality, hashing, and hex-colon formatting.
+  - Zero-duration rate flooring (verified `inf`/`nan` eliminated).
+  - Accurate start timestamp (`startTimeUnixMs`) calculation.
+  - Accumulation of all 6 TCP flags across multiple packets.
+  - CSV dataset format and export integrity.
