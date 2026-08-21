@@ -216,17 +216,8 @@ void parseTCP(const u_char* packet, int caplen, PacketInfo& info)
     info.hasTransport         = true;
     info.srcPort              = ntohs(tcph->source);
     info.dstPort              = ntohs(tcph->dest);
-
-    // NOTES: SCOPE NOTE — TCP flags (SYN/ACK/FIN...) aren't in
-    // PacketInfo yet. The task's target field list didn't ask for
-    // them, so they're deliberately left out of this pass. Easy to
-    // add later: a uint8_t flags bitmask, or individual bool fields,
-    // in PacketInfo, filled in right here from tcph->syn/ack/fin/etc.
-    //
-    // NOTES: this function is reached identically from both parseIPv4
-    // and parseIPv6 — it only ever sees a pointer + remaining length,
-    // never the IP version. No v6-specific change needed here, which
-    // is exactly why the transport-layer functions stay untouched.
+    // Byte 13 of the TCP header contains the standard flags (FIN, SYN, RST, PSH, ACK, URG)
+    info.tcpFlags             = packet[13];
 }
 
 void parseUDP(const u_char* packet, int caplen, PacketInfo& info)

@@ -43,11 +43,12 @@ struct PacketInfo
     uint8_t protocol = 0;  // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP...)
     uint8_t ttl      = 0;
 
-    // --- Transport layer --- ports  you show me your PacketInfo struonly, shared by TCP and UDP.
+    // --- Transport layer --- ports only, shared by TCP and UDP.
     // `protocol` above already tells you which one it was.
     bool hasTransport = false;
     uint16_t srcPort  = 0;
     uint16_t dstPort  = 0;
+    uint8_t tcpFlags  = 0;  // Raw TCP flags (FIN=0x01, SYN=0x02, RST=0x04, PSH=0x08, ACK=0x10, URG=0x20)
 
     // --- ICMP ---
     bool hasICMP     = false;

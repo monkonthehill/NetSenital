@@ -42,9 +42,17 @@ struct FlowKey
     }
 };
 
+constexpr uint8_t TCP_FIN = 0x01;
+constexpr uint8_t TCP_SYN = 0x02;
+constexpr uint8_t TCP_RST = 0x04;
+constexpr uint8_t TCP_PSH = 0x08;
+constexpr uint8_t TCP_ACK = 0x10;
+constexpr uint8_t TCP_URG = 0x20;
+
 struct Flow
 {
     FlowKey key;
+    uint64_t startTimeUnixMs = 0;
     int packet_counter = 0;
 
     // Length (in bytes) of the most recent packet received in this flow
@@ -55,6 +63,24 @@ struct Flow
 
     // Cumulative sum of payload/packet bytes across the entire lifetime of this flow
     std::uint64_t total_bytes = 0;
+
+    // TCP flag counters
+    uint32_t synCount = 0;
+    uint32_t ackCount = 0;
+    uint32_t finCount = 0;
+    uint32_t rstCount = 0;
+    uint32_t pshCount = 0;
+    uint32_t urgCount = 0;
+
+    void updateTcpFlags(uint8_t flags)
+    {
+        if (flags & TCP_SYN) synCount++;
+        if (flags & TCP_ACK) ackCount++;
+        if (flags & TCP_FIN) finCount++;
+        if (flags & TCP_RST) rstCount++;
+        if (flags & TCP_PSH) pshCount++;
+        if (flags & TCP_URG) urgCount++;
+    }
 
     double duration() const
     {
@@ -113,7 +139,11 @@ extern std::unordered_map<FlowKey, Flow, FlowKeyHash> flows;
 
 FlowKey makeFlowKey(const PacketInfo& info);
 
-void createFlows(const FlowKey& key, int pack_len, const timeval& arrival_time);
+std::string ipToString(uint32_t ipNetOrder);
+std::string getSrcIpStr(const FlowKey& key);
+std::string getDstIpStr(const FlowKey& key);
+
+void createFlows(const FlowKey& key, int pack_len, const timeval& arrival_time, uint8_t tcpFlags = 0);
 
 void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flow_table);
 

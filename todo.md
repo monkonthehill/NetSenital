@@ -1,7 +1,7 @@
 # NetSentinel - Project TODO & Roadmap
 
-## COMPLETED TASKS (Phase 1 & IPv6 Follow-Up)
---------------------------------------------------
+## COMPLETED TASKS (Phase 1 & Follow-Up Enhancements)
+------------------------------------------------------
 - [x] **flow.hpp**: Extended `FlowKey` to support IPv6 addresses (`isIPv6`, `srcIp6[16]`, `dstIp6[16]`).
 - [x] **flow.cpp**: Updated `makeFlowKey()` to populate IPv6 and IPv4 fields accurately from `PacketInfo`.
 - [x] **flow.hpp**: Replaced `FlowKeyHash` combiner with Boost-style `hash_combine` algorithm and 128-bit IPv6 folding to eliminate sequential port scan collisions.
@@ -13,15 +13,16 @@
 - [x] **parser.cpp**: Fixed IPv4 uninitialized stack variable bug overwriting `info.srcIp` and `info.dstIp`.
 - [x] **flow.hpp**: Documented `pack_len` (most recent packet length) vs `total_bytes` (cumulative flow volume).
 - [x] **flow.cpp**: Fixed `-Wshadow` compiler warning in `delete_flow`.
+- [x] **extractor.cpp & flow.cpp**: Fixed `inf` / zero-duration rate calculations by flooring rate denominator (`MIN_DURATION_SEC = 0.001`).
+- [x] **flow.hpp & flow.cpp**: Captured flow start Unix timestamp in milliseconds (`startTimeUnixMs`) from libpcap `timeval`.
+- [x] **flow.hpp & extractor.cpp**: Exported source and destination IP addresses (`srcIp`, `dstIp`) supporting both IPv4 and IPv6 string formats.
+- [x] **parser.cpp, flow.hpp, & extractor.cpp**: Implemented TCP flag parsing and counters (`synCount`, `ackCount`, `finCount`, `rstCount`, `pshCount`, `urgCount`) across `PacketInfo`, `Flow`, and CSV export.
 
 ---
 
 ## PHASE 2: ADVANCED FEATURE EXTRACTION & IPC (In Progress)
 ------------------------------------------------------------
 ### Advanced Flow Metrics
-- [ ] **TCP Flag Tracking (`PacketInfo` & `Flow`)**:
-  - Extract SYN, ACK, FIN, RST, PSH, URG flags in `parseTCP()`.
-  - Maintain cumulative counts and ratios per flow (e.g. SYN-to-ACK ratio for SYN flood detection).
 - [ ] **Bi-directional Flow Statistics (Forward / Backward)**:
   - Track forward packet/byte counts (`fwd_packets`, `fwd_bytes`) vs backward packet/byte counts (`bwd_packets`, `bwd_bytes`).
   - Calculate forward/backward packet size statistics and header length metrics (CICFlowMeter-compatible).

@@ -1,19 +1,34 @@
-#include <ctime>    // Required for std::localtime
+#pragma once
+
+#include <cstdint>
+#include <ctime>
+#include <string>
 #include "../include/flow.hpp"
 
 struct FlowFeatures
 {
-    double duration;
-    uint32_t packets;
-    uint64_t bytes;
+    uint64_t startTimeUnixMs = 0;
+    std::string srcIp;
+    std::string dstIp;
+    uint16_t srcPort = 0;
+    uint16_t dstPort = 0;
+    uint8_t protocol = 0;
 
-    double packetsPerSecond;
-    double bytesPerSecond;
+    double duration = 0.0;
+    uint32_t packets = 0;
+    uint64_t bytes = 0;
 
-    double averagePacketSize;
+    double packetsPerSecond = 0.0;
+    double bytesPerSecond = 0.0;
 
-    uint16_t srcPort;
-    uint16_t dstPort;
-    uint8_t protocol;
+    double averagePacketSize = 0.0;
+
+    // TCP flag counters
+    uint32_t synCount = 0;
+    uint32_t ackCount = 0;
+    uint32_t finCount = 0;
+    uint32_t rstCount = 0;
+    uint32_t pshCount = 0;
+    uint32_t urgCount = 0;
 };
 

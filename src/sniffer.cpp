@@ -64,7 +64,21 @@ static void printPacketInfo(const PacketInfo& info)
 
         if (info.hasTransport)
         {
-            std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+            if (info.protocol == 6)
+            {
+                std::printf("[l4]  port %u -> %u [flags:%s%s%s%s%s%s]\n",
+                    info.srcPort, info.dstPort,
+                    (info.tcpFlags & TCP_SYN) ? " SYN" : "",
+                    (info.tcpFlags & TCP_ACK) ? " ACK" : "",
+                    (info.tcpFlags & TCP_FIN) ? " FIN" : "",
+                    (info.tcpFlags & TCP_RST) ? " RST" : "",
+                    (info.tcpFlags & TCP_PSH) ? " PSH" : "",
+                    (info.tcpFlags & TCP_URG) ? " URG" : "");
+            }
+            else
+            {
+                std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+            }
         }
 
         if (info.hasICMPv6)
@@ -90,7 +104,21 @@ static void printPacketInfo(const PacketInfo& info)
 
         if (info.hasTransport)
         {
-            std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+            if (info.protocol == 6)
+            {
+                std::printf("[l4]  port %u -> %u [flags:%s%s%s%s%s%s]\n",
+                    info.srcPort, info.dstPort,
+                    (info.tcpFlags & TCP_SYN) ? " SYN" : "",
+                    (info.tcpFlags & TCP_ACK) ? " ACK" : "",
+                    (info.tcpFlags & TCP_FIN) ? " FIN" : "",
+                    (info.tcpFlags & TCP_RST) ? " RST" : "",
+                    (info.tcpFlags & TCP_PSH) ? " PSH" : "",
+                    (info.tcpFlags & TCP_URG) ? " URG" : "");
+            }
+            else
+            {
+                std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
+            }
         }
 
         if (info.hasICMP)
@@ -212,7 +240,7 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     {
         FlowKey newKey = makeFlowKey(info);
 
-        createFlows(newKey, pkthdr->len, arrival_time);
+        createFlows(newKey, pkthdr->len, arrival_time, info.tcpFlags);
 
         // NOTES: throttling itself lives in maybeRefreshDisplay() at file
         // scope, shared with main.cpp's capture-timeout path — see the

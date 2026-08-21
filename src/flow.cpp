@@ -1,6 +1,7 @@
 #include "../include/flow.hpp"
 
 #include <arpa/inet.h>
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <ctime>
@@ -34,6 +35,43 @@ FlowKey makeFlowKey(const PacketInfo& info)
     return key;
 }
 
+std::string ipToString(uint32_t ipNetOrder)
+{
+    char buf[INET_ADDRSTRLEN];
+    struct in_addr addr;
+    addr.s_addr = ipNetOrder;
+    inet_ntop(AF_INET, &addr, buf, sizeof(buf));
+    return std::string(buf);
+}
+
+std::string getSrcIpStr(const FlowKey& key)
+{
+    if (key.isIPv6)
+    {
+        char buf[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, key.srcIp6, buf, sizeof(buf));
+        return std::string(buf);
+    }
+    else
+    {
+        return ipToString(htonl(key.srcIp));
+    }
+}
+
+std::string getDstIpStr(const FlowKey& key)
+{
+    if (key.isIPv6)
+    {
+        char buf[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, key.dstIp6, buf, sizeof(buf));
+        return std::string(buf);
+    }
+    else
+    {
+        return ipToString(htonl(key.dstIp));
+    }
+}
+
 // Flow is the major struct and FlowKey is the sub struct,So we are using vector
 // (temporarly) to store every flow and every time a new flow comes we make a new
 // entry in the vector
@@ -52,7 +90,7 @@ std::unordered_map<FlowKey, Flow, FlowKeyHash> flows;
 // IMPORTANT:
 // We now pass the complete timeval instead of only time_t.
 // This preserves microsecond precision provided by libpcap.
-void createFlows(const FlowKey& key, int pac_len, const timeval& arrival_time)
+void createFlows(const FlowKey& key, int pac_len, const timeval& arrival_time, uint8_t tcpFlags)
 {
     auto it = flows.find(key);
 
@@ -70,18 +108,22 @@ void createFlows(const FlowKey& key, int pac_len, const timeval& arrival_time)
         // recent packet in the flow, not a stale first-packet value.
         it->second.total_bytes += pac_len;
         it->second.pack_len = pac_len;
+        it->second.updateTcpFlags(tcpFlags);
     }
     else
     {
         Flow newFlow;
+        newFlow.key = key;
+        newFlow.startTimeUnixMs = static_cast<uint64_t>(arrival_time.tv_sec) * 1000
+                                + arrival_time.tv_usec / 1000;
         newFlow.packet_counter = 1;
-        newFlow.key            = key;
         newFlow.pack_len       = pac_len;
         newFlow.total_bytes    = pac_len;
 
         // Copy the complete timestamp instead of only tv_sec.
         newFlow.first_seen = arrival_time;
         newFlow.last_seen  = arrival_time;
+        newFlow.updateTcpFlags(tcpFlags);
 
         flows[key] = newFlow;
 
@@ -156,27 +198,16 @@ void printFlows()
     {
         // Use Flow::duration() so microseconds are included.
         double duration = flow.second.duration();
+        constexpr double MIN_DURATION_SEC = 0.001; // 1ms floor
+        double rateDuration = std::max(duration, MIN_DURATION_SEC);
 
-        char srcStr[INET6_ADDRSTRLEN];
-        char dstStr[INET6_ADDRSTRLEN];
-
-        if (flow.first.isIPv6)
-        {
-            inet_ntop(AF_INET6, flow.first.srcIp6, srcStr, sizeof(srcStr));
-            inet_ntop(AF_INET6, flow.first.dstIp6, dstStr, sizeof(dstStr));
-        }
-        else
-        {
-            in_addr srcAddr, dstAddr;
-            srcAddr.s_addr = htonl(flow.first.srcIp);
-            dstAddr.s_addr = htonl(flow.first.dstIp);
-            inet_ntop(AF_INET, &srcAddr, srcStr, sizeof(srcStr));
-            inet_ntop(AF_INET, &dstAddr, dstStr, sizeof(dstStr));
-        }
+        std::string srcStr = getSrcIpStr(flow.first);
+        std::string dstStr = getDstIpStr(flow.first);
 
         std::cout << srcStr << ":" << flow.first.srcPort << " -> " << dstStr << ":" << flow.first.dstPort
                   << " | Proto: " << static_cast<int>(flow.first.protocol)
                   << " | Packets: " << flow.second.packet_counter << '\n'
+                  << "   Start Time: " << flow.second.startTimeUnixMs << " (Unix ms)\n"
                   << "   First Seen: " << formatTime(flow.second.first_seen.tv_sec) << '\n'
                   << "   Last Seen:  " << formatTime(flow.second.last_seen.tv_sec) << '\n'
                   << "   Duration:   " << duration << " sec\n"
@@ -184,16 +215,19 @@ void printFlows()
                   << static_cast<double>(flow.second.total_bytes) / flow.second.packet_counter
                   << " bytes\n";
 
-        if (duration > 0.0)
+        if (flow.first.protocol == 6)
         {
-            std::cout << "   Throughput: "
-                      << static_cast<double>(flow.second.total_bytes) / duration << " Bps | "
-                      << static_cast<double>(flow.second.packet_counter) / duration << " pps\n";
+            std::cout << "   TCP Flags:  SYN=" << flow.second.synCount
+                      << " ACK=" << flow.second.ackCount
+                      << " FIN=" << flow.second.finCount
+                      << " RST=" << flow.second.rstCount
+                      << " PSH=" << flow.second.pshCount
+                      << " URG=" << flow.second.urgCount << '\n';
         }
-        else
-        {
-            std::cout << "   Throughput: " << flow.second.total_bytes << " Bytes (Single Burst)\n";
-        }
+
+        std::cout << "   Throughput: "
+                  << static_cast<double>(flow.second.total_bytes) / rateDuration << " Bps | "
+                  << static_cast<double>(flow.second.packet_counter) / rateDuration << " pps\n";
 
         std::cout << "--------------------------------------------------------\n";
     }

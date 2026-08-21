@@ -1,4 +1,5 @@
 #include "../include/extractor.hpp"
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -6,18 +7,6 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <cstring>
-
-// struct FlowFeatures {
-//     double duration;
-//     uint32_t packets;
-//     uint64_t bytes;
-//     double packetsPerSecond;
-//     double bytesPerSecond;
-//     double averagePacketSize;
-//     uint16_t srcPort;
-//     uint16_t dstPort;
-//     uint8_t protocol;
-// };
 
 // Helper function to check if file exists
 bool fileExists(const std::string& filename) {
@@ -64,64 +53,68 @@ void saveFeaturesToCSV(const FlowFeatures& features) {
     
     // Write header if this is a new file
     if (isNewFile) {
-        csvFile << "duration,packets,bytes,packetsPerSecond,bytesPerSecond,"
-                << "averagePacketSize,srcPort,dstPort,protocol\n";
+        csvFile << "startTimeUnixMs,srcIp,dstIp,srcPort,dstPort,protocol,"
+                << "duration,packets,bytes,packetsPerSecond,bytesPerSecond,"
+                << "averagePacketSize,synCount,ackCount,finCount,rstCount,pshCount,urgCount\n";
     }
     
     // Write the data row
-    csvFile << features.duration << ","
+    csvFile << features.startTimeUnixMs << ","
+            << features.srcIp << ","
+            << features.dstIp << ","
+            << features.srcPort << ","
+            << features.dstPort << ","
+            << static_cast<int>(features.protocol) << ","
+            << features.duration << ","
             << features.packets << ","
             << features.bytes << ","
             << features.packetsPerSecond << ","
             << features.bytesPerSecond << ","
             << features.averagePacketSize << ","
-            << features.srcPort << ","
-            << features.dstPort << ","
-            << static_cast<int>(features.protocol)  // Cast to int to print as number, not character
+            << features.synCount << ","
+            << features.ackCount << ","
+            << features.finCount << ","
+            << features.rstCount << ","
+            << features.pshCount << ","
+            << features.urgCount
             << "\n";
     
     csvFile.close();
-    
-    // Optional: Verify if write was successful
-    // if (csvFile.good()) {
-    //     std::cout << "Features successfully saved to " << filename << std::endl;
-    // } else {
-    //     std::cerr << "Error occurred while writing to file" << std::endl;
-    // }
 }
 
 void extract_features(const Flow& flow)
 {
     FlowFeatures features;
 
+    constexpr double MIN_DURATION_SEC = 0.001; // 1ms floor
     double duration = flow.duration();
+    double rateDuration = std::max(duration, MIN_DURATION_SEC);
+
+    features.startTimeUnixMs = flow.startTimeUnixMs;
+    features.srcIp = getSrcIpStr(flow.key);
+    features.dstIp = getDstIpStr(flow.key);
+    features.srcPort = flow.key.srcPort;
+    features.dstPort = flow.key.dstPort;
+    features.protocol = flow.key.protocol;
 
     features.duration = duration;
     features.packets = flow.packet_counter;
     features.bytes = flow.total_bytes;
+
+    features.packetsPerSecond = static_cast<double>(flow.packet_counter) / rateDuration;
+    features.bytesPerSecond   = static_cast<double>(flow.total_bytes) / rateDuration;
 
     features.averagePacketSize =
         (flow.packet_counter > 0)
             ? static_cast<double>(flow.total_bytes) / flow.packet_counter
             : 0.0;
 
-    if (duration > 0.0)
-    {
-        features.packetsPerSecond =
-            static_cast<double>(flow.packet_counter) / duration;
-
-        features.bytesPerSecond =
-            static_cast<double>(flow.total_bytes) / duration;
-    }
-    else
-    {
-        features.packetsPerSecond = 0.0;
-        features.bytesPerSecond = 0.0;
-    }
-
-    features.srcPort = flow.key.srcPort;
-    features.dstPort = flow.key.dstPort;
-    features.protocol = flow.key.protocol;
+    features.synCount = flow.synCount;
+    features.ackCount = flow.ackCount;
+    features.finCount = flow.finCount;
+    features.rstCount = flow.rstCount;
+    features.pshCount = flow.pshCount;
+    features.urgCount = flow.urgCount;
 
     saveFeaturesToCSV(features);
 }
