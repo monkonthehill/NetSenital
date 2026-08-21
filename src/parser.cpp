@@ -99,16 +99,11 @@ void parseIPv4(const u_char* packet, int caplen, PacketInfo& info)
         return;
     }
 
-    u_int32_t srcIp /* [INET_ADDRSTRLEN] */;
-    u_int32_t dstIp /* [INET_ADDRSTRLEN] */;
-    info.srcIp = ntohl(iph->ip_src.s_addr);
-    info.dstIp = ntohl(iph->ip_dst.s_addr);
-
     // NOTES: hasIPv4 = true is what tells printPacketInfo() later that
     // these fields are real and not just zero-initialized defaults.
     info.hasIPv4  = true;
-    info.srcIp    = srcIp;
-    info.dstIp    = dstIp;
+    info.srcIp    = ntohl(iph->ip_src.s_addr);
+    info.dstIp    = ntohl(iph->ip_dst.s_addr);
     info.protocol = iph->ip_p;
     info.ttl      = iph->ip_ttl;
 

@@ -1,7 +1,10 @@
+#pragma once
+
 #include <sys/time.h>
 #include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
 #include <string>
 #include <unordered_map>
@@ -11,29 +14,46 @@
 
 struct FlowKey
 {
-    uint32_t dstIp;
-    uint32_t srcIp;
-    uint16_t srcPort;
-    uint16_t dstPort;
-    uint8_t protocol = 0;  // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP...)
+    bool isIPv6 = false;
+    uint32_t srcIp = 0;
+    uint32_t dstIp = 0;
+    uint8_t srcIp6[16] = {0};
+    uint8_t dstIp6[16] = {0};
+    uint16_t srcPort = 0;
+    uint16_t dstPort = 0;
+    uint8_t protocol = 0;  // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP, 58=ICMPv6...)
 
-                           // Overload the == operator for direct comparison
+    // Overload the == operator for direct comparison
     bool operator==(const FlowKey& other) const
     {
-        return srcIp == other.srcIp && dstIp == other.dstIp && srcPort == other.srcPort
-               && dstPort == other.dstPort && protocol == other.protocol;
+        if (isIPv6 != other.isIPv6 || protocol != other.protocol ||
+            srcPort != other.srcPort || dstPort != other.dstPort)
+        {
+            return false;
+        }
+
+        if (isIPv6)
+        {
+            return std::memcmp(srcIp6, other.srcIp6, 16) == 0 &&
+                   std::memcmp(dstIp6, other.dstIp6, 16) == 0;
+        }
+
+        return srcIp == other.srcIp && dstIp == other.dstIp;
     }
 };
-
 
 struct Flow
 {
     FlowKey key;
     int packet_counter = 0;
+
+    // Length (in bytes) of the most recent packet received in this flow
     int pack_len = 0;
+
     timeval first_seen{};
     timeval last_seen{};
 
+    // Cumulative sum of payload/packet bytes across the entire lifetime of this flow
     std::uint64_t total_bytes = 0;
 
     double duration() const
@@ -43,24 +63,51 @@ struct Flow
     }
 };
 
-//vibe coded ---->
+namespace flow_detail
+{
+    template <typename T>
+    inline void hash_combine(std::size_t& seed, const T& val)
+    {
+        std::size_t h = std::hash<T>{}(val);
+        seed ^= h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+    }
+
+    inline std::size_t hash_ipv6_bytes(const uint8_t ip6[16])
+    {
+        uint64_t high = 0, low = 0;
+        std::memcpy(&high, ip6, sizeof(uint64_t));
+        std::memcpy(&low, ip6 + sizeof(uint64_t), sizeof(uint64_t));
+        std::size_t seed = std::hash<uint64_t>{}(high);
+        hash_combine(seed, low);
+        return seed;
+    }
+}
+
 struct FlowKeyHash
 {
     std::size_t operator()(const FlowKey& key) const
     {
-        // Combine hashes of all fields
-        std::size_t h1 = std::hash<uint32_t>{}(key.srcIp);
-        std::size_t h2 = std::hash<u_int32_t> {}(key.dstIp);
-        std::size_t h3 = std::hash<uint16_t> {}(key.srcPort);
-        std::size_t h4 = std::hash<uint16_t> {}(key.dstPort);
-        std::size_t h5 = std::hash<uint8_t> {}(key.protocol);
+        std::size_t seed = 0;
+        flow_detail::hash_combine(seed, key.isIPv6);
 
-        // Combine them (using XOR and bit shifting)
-        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
+        if (key.isIPv6)
+        {
+            flow_detail::hash_combine(seed, flow_detail::hash_ipv6_bytes(key.srcIp6));
+            flow_detail::hash_combine(seed, flow_detail::hash_ipv6_bytes(key.dstIp6));
+        }
+        else
+        {
+            flow_detail::hash_combine(seed, key.srcIp);
+            flow_detail::hash_combine(seed, key.dstIp);
+        }
+
+        flow_detail::hash_combine(seed, key.srcPort);
+        flow_detail::hash_combine(seed, key.dstPort);
+        flow_detail::hash_combine(seed, key.protocol);
+
+        return seed;
     }
 };
-
-//-------
 
 extern std::unordered_map<FlowKey, Flow, FlowKeyHash> flows;
 
@@ -68,7 +115,9 @@ FlowKey makeFlowKey(const PacketInfo& info);
 
 void createFlows(const FlowKey& key, int pack_len, const timeval& arrival_time);
 
-void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flows);
+void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flow_table);
+
+void maybePruneFlows();
 
 void printFlows();
 

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <ostream>
 
+#include "../include/flow.hpp"
 #include "../include/sniffer.hpp"
 
 int main()
@@ -106,6 +107,7 @@ int main()
                 // refresh the dashboard or expire old flows.
 
                 maybeRefreshDisplay(false, packetCount, 0, nullptr);
+                maybePruneFlows();
 
                 auto now = std::chrono::steady_clock::now();
 

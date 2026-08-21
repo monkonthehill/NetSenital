@@ -1,84 +1,64 @@
-NetSentinel - IPv6 follow-up TODO
-==================================
+# NetSentinel - Project TODO & Roadmap
 
-BLOCKING (producing wrong output right now)
---------------------------------------------
-[ ] flow.hpp: extend FlowKey to support IPv6 addresses
-    - srcIp/dstIp are uint32_t (32-bit) - can't hold a 128-bit v6 address
-    - decide the shape before touching makeFlowKey:
-        (A) add srcIp6[16]/dstIp6[16] + bool isIPv6 to the same struct
-            (simplest, but wastes space per-key and operator==/hash must
-            branch on isIPv6, or two different-family flows can compare equal)
-        (B) tagged union/variant - more correct, more code
-        (C) split into flows4 / flows6 maps with two FlowKey types
-            (no wasted space, but duplicates createFlows/printFlows/etc,
-            or template them)
-    - until fixed: every IPv6 flow with the same protocol+ports collapses
-      into ONE shared entry regardless of which hosts are actually talking
-      (info.srcIp/dstIp are unset/0 for v6 packets, so they all compare equal)
+## COMPLETED TASKS (Phase 1 & IPv6 Follow-Up)
+--------------------------------------------------
+- [x] **flow.hpp**: Extended `FlowKey` to support IPv6 addresses (`isIPv6`, `srcIp6[16]`, `dstIp6[16]`).
+- [x] **flow.cpp**: Updated `makeFlowKey()` to populate IPv6 and IPv4 fields accurately from `PacketInfo`.
+- [x] **flow.hpp**: Replaced `FlowKeyHash` combiner with Boost-style `hash_combine` algorithm and 128-bit IPv6 folding to eliminate sequential port scan collisions.
+- [x] **flow.cpp**: Updated `printFlows()` to render IPv4 in dotted-decimal (`192.168.1.1`) and IPv6 in standard hex-colon (`2001:db8::1`) notation using `inet_ntop`.
+- [x] **sniffer.cpp**: Implemented `maybePruneFlows()` throttling to eliminate per-packet map traversals and `std::time()` syscall overhead.
+- [x] **sniffer.cpp**: Normalized log output tags and removed redundant untagged `(is IPv4)` / `(is IPv6)` messages.
+- [x] **sniffer.cpp**: Enabled flow tracking for ICMP (v4) and ICMPv6 packets.
+- [x] **sniffer.cpp**: Cleaned up unused variables (`int i = 0;`).
+- [x] **parser.cpp**: Fixed IPv4 uninitialized stack variable bug overwriting `info.srcIp` and `info.dstIp`.
+- [x] **flow.hpp**: Documented `pack_len` (most recent packet length) vs `total_bytes` (cumulative flow volume).
+- [x] **flow.cpp**: Fixed `-Wshadow` compiler warning in `delete_flow`.
 
-[ ] flow.cpp: makeFlowKey() - populate v6 fields once FlowKey supports them
-    - currently only copies info.srcIp/info.dstIp (v4 fields), never
-      info.srcIp6/dstIp6
+---
 
-[ ] flow.hpp: FlowKeyHash - update once v6 fields exist, and fix the combiner
-    - current: h1 ^ (h2<<1) ^ (h3<<2) ^ (h4<<3) ^ (h5<<4)
-    - small parallel shifts collide easily on structurally similar keys
-      (e.g. many flows to one host on sequential ports - a scan pattern,
-      which matters for an IDS specifically)
-    - replace with a proper hash_combine (fold each field's hash into a
-      running seed, not a fixed shift per field)
+## PHASE 2: ADVANCED FEATURE EXTRACTION & IPC (In Progress)
+------------------------------------------------------------
+### Advanced Flow Metrics
+- [ ] **TCP Flag Tracking (`PacketInfo` & `Flow`)**:
+  - Extract SYN, ACK, FIN, RST, PSH, URG flags in `parseTCP()`.
+  - Maintain cumulative counts and ratios per flow (e.g. SYN-to-ACK ratio for SYN flood detection).
+- [ ] **Bi-directional Flow Statistics (Forward / Backward)**:
+  - Track forward packet/byte counts (`fwd_packets`, `fwd_bytes`) vs backward packet/byte counts (`bwd_packets`, `bwd_bytes`).
+  - Calculate forward/backward packet size statistics and header length metrics (CICFlowMeter-compatible).
+- [ ] **Inter-Arrival Time (IAT) Calculation**:
+  - Compute min, max, mean, and standard deviation of inter-packet arrival times per flow (`fwd_iat_mean`, `bwd_iat_mean`, `flow_iat_std`).
+- [ ] **Packet Size Distribution**:
+  - Compute payload size variance and standard deviation across flow lifetime.
 
-DESIGN DECISION NEEDED
------------------------
-[ ] Flow directionality: uni- vs bi-directional flows
-    - right now A:port -> B:port and B:port -> A:port hash to DIFFERENT keys
-    - if feature extraction wants whole-conversation flows (CICFlowMeter-style
-      duration/byte counts spanning both directions), normalize src/dst order
-      in makeFlowKey (e.g. always store the numerically smaller address as
-      srcIp) so both directions land in the same bucket
-    - confirm intent before more feature-extraction work builds on top of this
+### Inter-Process Communication
+- [ ] **ZeroMQ / Socket Publisher**:
+  - Implement a non-blocking publisher to stream expired `FlowFeatures` or live flow metrics to external consumers/Python ML pipelines via IPC/TCP.
 
-PERFORMANCE
-------------
-[ ] sniffer.cpp: delete_flow(flows) is called on every packet, unthrottled
-    - full map walk + std::time() syscall per packet, not per tick
-    - same problem maybeRefreshDisplay() already solved for the UI - apply
-      the same fix: gate behind a last_prune_time check (e.g. only actually
-      walk the map if >=1s has passed since the last prune)
+---
 
-CORRECTNESS / DISPLAY
------------------------
-[ ] flow.cpp: printFlows() prints raw uint32_t srcIp/dstIp (e.g. 3232235781)
-    instead of dotted-decimal
-    - route through inet_ntop, same as printPacketInfo already does
-    - needs a v6 branch too once FlowKey carries v6 addresses
+## PHASE 3: MACHINE LEARNING & ANOMALY DETECTION (Planned)
+-----------------------------------------------------------
+- [ ] **Offline Training Pipeline (`scripts/train_model.py`)**:
+  - Scikit-learn / XGBoost training script parsing exported CSV dataset (`Data/packet_data.csv`).
+  - Baseline classification for normal traffic vs port scans, DoS/DDoS, and brute-force patterns.
+- [ ] **Real-Time Inference Engine**:
+  - Embed lightweight C++ inference runtime or Python sidecar evaluating live flow feature vectors.
+  - Generate real-time anomaly scores (0.0 - 1.0) and alert logs.
 
-[ ] sniffer.cpp: "(is IPv6)" / "(is IPv4)" announcement lines have no
-    bracket tag, unlike every other log line ([eth]/[ip]/[l4]/[icmp])
-    - either drop them (the next [ip] line already says everything) or
-      tag them consistently, e.g. "[ip]  (IPv6)"
+---
 
-CLEANUP (no functional impact)
+## PHASE 4: MONITORING & VISUALIZATION (Planned)
+-------------------------------------------------
+- [ ] **Prometheus Metrics Exporter**:
+  - Expose active flow count, PPS, BPS, and anomaly counters on `/metrics`.
+- [ ] **Grafana Dashboard Configuration**:
+  - Pre-configured dashboard templates for real-time traffic visualization and security alerts.
+
+---
+
+## DEFERRED / HARDENING BACKLOG
 --------------------------------
-[ ] sniffer.cpp: processPackets() - unused `int i = 0;`
-    (leftover from the old commented-out C-style cast line above it)
-
-[ ] flow.hpp: Flow struct - pack_len vs total_bytes naming is ambiguous
-    - clarify with a comment or rename whether pack_len = most recent
-      packet's length only, vs total_bytes = running sum across the flow
-
-SCOPE NOTES (deliberately deferred, not bugs)
-------------------------------------------------
-[ ] parser.cpp: IPv6 extension header chaining unhandled
-    - Hop-by-Hop / Routing / Fragment / Destination Options / AH all fall
-      to the default case and stay unparsed
-    - fine for plain TCP/UDP-over-v6 traffic; revisit if fragmented or
-      option-bearing v6 traffic shows up in real captures
-
-[ ] flow.cpp: delete_flow()'s idle check compares the packet's own
-    timestamp (last_seen.tv_sec) against wall-clock std::time(nullptr)
-    - correct for live capture
-    - would be wrong for offline .pcap replay (every flow would read as
-      instantly >30s idle and get pruned after its first packet) - only
-      matters if replay support is ever added
+- [ ] **parser.cpp: IPv6 Extension Header Chaining**:
+  - Parse Hop-by-Hop, Routing, Fragment, and Destination Options headers iteratively to resolve trailing transport payloads.
+- [ ] **flow.cpp: Offline PCAP Replay Support**:
+  - Decouple flow expiration clock from wall-clock `std::time(nullptr)` to use packet timestamp `pkthdr->ts` when replaying pcap dump files.

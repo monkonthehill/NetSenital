@@ -1,5 +1,8 @@
 #include "../include/flow.hpp"
 
+#include <arpa/inet.h>
+#include <chrono>
+#include <cstring>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
@@ -11,8 +14,19 @@
 FlowKey makeFlowKey(const PacketInfo& info)
 {
     FlowKey key;
-    key.srcIp    = info.srcIp;
-    key.dstIp    = info.dstIp;
+    if (info.hasIPv6)
+    {
+        key.isIPv6 = true;
+        std::memcpy(key.srcIp6, info.srcIp6, 16);
+        std::memcpy(key.dstIp6, info.dstIp6, 16);
+    }
+    else
+    {
+        key.isIPv6 = false;
+        key.srcIp  = info.srcIp;
+        key.dstIp  = info.dstIp;
+    }
+
     key.dstPort  = info.dstPort;
     key.srcPort  = info.srcPort;
     key.protocol = info.protocol;
@@ -77,11 +91,11 @@ void createFlows(const FlowKey& key, int pac_len, const timeval& arrival_time)
     }
 }
 
-void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flows)
+void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flow_table)
 {
     std::time_t now = std::time(nullptr);
 
-    for (auto it = flows.begin(); it != flows.end();)
+    for (auto it = flow_table.begin(); it != flow_table.end();)
     {
         // Calculate how long this flow has been idle.
         double idle = std::difftime(now, it->second.last_seen.tv_sec);
@@ -89,13 +103,28 @@ void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flows)
         if (idle >= 30)
         {
             extract_features(it->second);
-            it = flows.erase(it);
+            it = flow_table.erase(it);
         }
         else
         {
             ++it;
         }
     }
+}
+
+static auto last_prune_time = std::chrono::steady_clock::now();
+constexpr auto PRUNE_INTERVAL_MS = std::chrono::milliseconds(1000);
+
+void maybePruneFlows()
+{
+    auto now = std::chrono::steady_clock::now();
+    if (now - last_prune_time < PRUNE_INTERVAL_MS)
+    {
+        return;
+    }
+
+    delete_flow(flows);
+    last_prune_time = now;
 }
 
 // Helper function to format time_t into a string
@@ -128,8 +157,24 @@ void printFlows()
         // Use Flow::duration() so microseconds are included.
         double duration = flow.second.duration();
 
-        std::cout << flow.first.srcIp << " : " << flow.first.srcPort << " -> " << flow.first.dstIp
-                  << " : " << flow.first.dstPort
+        char srcStr[INET6_ADDRSTRLEN];
+        char dstStr[INET6_ADDRSTRLEN];
+
+        if (flow.first.isIPv6)
+        {
+            inet_ntop(AF_INET6, flow.first.srcIp6, srcStr, sizeof(srcStr));
+            inet_ntop(AF_INET6, flow.first.dstIp6, dstStr, sizeof(dstStr));
+        }
+        else
+        {
+            in_addr srcAddr, dstAddr;
+            srcAddr.s_addr = htonl(flow.first.srcIp);
+            dstAddr.s_addr = htonl(flow.first.dstIp);
+            inet_ntop(AF_INET, &srcAddr, srcStr, sizeof(srcStr));
+            inet_ntop(AF_INET, &dstAddr, dstStr, sizeof(dstStr));
+        }
+
+        std::cout << srcStr << ":" << flow.first.srcPort << " -> " << dstStr << ":" << flow.first.dstPort
                   << " | Proto: " << static_cast<int>(flow.first.protocol)
                   << " | Packets: " << flow.second.packet_counter << '\n'
                   << "   First Seen: " << formatTime(flow.second.first_seen.tv_sec) << '\n'

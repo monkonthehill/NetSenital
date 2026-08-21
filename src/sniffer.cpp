@@ -49,14 +49,11 @@ static void printPacketInfo(const PacketInfo& info)
 
     if (!info.hasIPv4 && !info.hasIPv6)
     {
-        std::printf("(nor IPv6 neither IPv4 !!)\n");
         return;
     }
 
     if (info.hasIPv6)
     {
-        std::printf("(is IPv6)\n");
-
         char src6[INET6_ADDRSTRLEN];
         char dst6[INET6_ADDRSTRLEN];
 
@@ -79,9 +76,6 @@ static void printPacketInfo(const PacketInfo& info)
 
     if (info.hasIPv4)
     {
-        std::printf("(is IPv4)\n");
-        //converted unsigned int 32 into string so that printing is  reliable
-
         in_addr srcAddr, dstAddr;
         srcAddr.s_addr = htonl(info.srcIp);
         dstAddr.s_addr = htonl(info.dstIp);
@@ -189,21 +183,16 @@ void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const 
 void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char* packet)
 {
     //*packet stores the adress of the first byte of contiguous block of bytes.
-    // int i = 0 , *counter  = (int *) arg;   in this line we are using c type casting which is not considered safe idk why but it is what it is
     // reinterpret_cast is preferred because it makes the conversion explicit.
     // C-style casts can perform multiple kinds of casts implicitly, making
     // code harder to understand and potentially less safe.
     const timeval& arrival_time = pkthdr->ts;
 
-
-    int i = 0, *counter = reinterpret_cast<int*>(arg);
+    int* counter = reinterpret_cast<int*>(arg);
 
     // Track statistics and parse incoming data silently
 
     ++(*counter);
-
-    // time_t packet_time = pkthdr->ts.tv_sec;
-    // std::printf("Packet timestamp : %d\n",(int)packet_time);
 
     // NOTES: this is the actual refactor. Before: parseEthernet() would
     // have printed as it went. Now: it fills `info` and returns silently,
@@ -212,7 +201,6 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     PacketInfo info;
     parseEthernet(packet, static_cast<int>(pkthdr->caplen), info);
 
-
     // NOTES: after parsing the packet into PacketInfo, we derive a FlowKey
     // (src/dst IP, ports, protocol) that uniquely identifies a network flow.
     // createFlows() searches the existing flow table: if a matching FlowKey is
@@ -220,11 +208,9 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // new Flow and stores it in the global flow list. This lays the foundation
     // for maintaining per-flow statistics instead of treating every packet
     // independently.
-    if ((info.hasIPv4 || info.hasIPv6) && info.hasTransport)
+    if ((info.hasIPv4 || info.hasIPv6) && (info.hasTransport || info.hasICMP || info.hasICMPv6))
     {
-
         FlowKey newKey = makeFlowKey(info);
-
 
         createFlows(newKey, pkthdr->len, arrival_time);
 
@@ -233,11 +219,9 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
         // NOTES above that function and above last_ui_update for why this
         // moved out of an inline check.
         maybeRefreshDisplay(/*hasPacket=*/true, *counter, pkthdr->len, &info);
-
-        // NOTES: this raw hex/ASCII payload dump is untouched — it's separate
-        // from the layered parser and wasn't part of this task's scope.
     }
-    delete_flow(flows);
+
+    maybePruneFlows();
     return;
 }
 
