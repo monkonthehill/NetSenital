@@ -57,33 +57,38 @@ NetSentinel is ideal for network engineers, security researchers, and systems pr
 - Live packet capture using **libpcap**
 - Network interface enumeration and interactive selection
 - Ethernet frame parsing (L2)
-- IPv4 packet parsing (L3)
-- TCP, UDP, and ICMP protocol parsing (L4)
+- **IPv4 and IPv6** packet parsing (L3)
+- **TCP, UDP, ICMP, and ICMPv6** protocol parsing (L4)
+- **TCP Flag Tracking** — cumulative counts for SYN, ACK, FIN, RST, PSH, and URG
 - Unified **PacketInfo** abstraction for protocol-agnostic packet handling
-- **FlowKey** generation (5-tuple: source IP, destination IP, source port, destination port, protocol)
-- Flow tracking with statistics:
+- **FlowKey** generation (5-tuple: source IP, destination IP, source port, destination port, protocol) with native IPv4/IPv6 support
+- **Collision-Resistant Hashing** — Boost-style `hash_combine` with 128-bit IPv6 folding to eliminate collisions on sequential port scans
+- Flow tracking with real-time statistics:
+  - Flow start timestamp (`startTimeUnixMs`) with millisecond precision
   - Packet counter per flow
   - Byte counter per flow
   - First seen / Last seen timestamps (microsecond precision)
   - Flow duration calculation
   - Average packet size
-  - Throughput calculation
-- Flow timeout and cleanup with configurable idle threshold
-- Feature extraction from expired flows
-- CSV dataset export with automatically generated headers
-- Live terminal dashboard with real-time flow statistics
-- Manual capture loop (no blocking callbacks — full control over execution)
+  - Throughput calculation with rate denominator flooring (eliminating `inf`/`nan` on bursts)
+  - TCP flag distribution per flow
+- Throttled flow timeout and cleanup with configurable idle threshold (1-second tick)
+- 18-feature extraction from expired flows
+- CSV dataset export with automatically generated headers (`Data/packet_data.csv`)
+- Live terminal dashboard with real-time flow and flag statistics
+- Manual capture loop with timeout handling (no blocking callbacks — full control over execution)
 
 ### 🔄 In Progress
 
-- Enhanced feature extraction for ML
-- ZeroMQ bridge for inter-process communication
-- Real-time feature prediction pipeline
+- Bi-directional flow statistics (forward/backward packet and byte counts)
+- Inter-arrival time (IAT) calculation (mean, min, max, std dev)
+- Packet size distribution metrics
+- ZeroMQ bridge for real-time IPC streaming to ML models
 
-### ���� Planned
+### 📋 Planned
 
-- Machine learning model integration (XGBoost)
-- Anomaly detection engine
+- Machine learning model integration (XGBoost / Random Forest)
+- Anomaly detection engine & live threat scoring
 - Prometheus metrics export
 - Grafana dashboard integration
 - Flow visualization
@@ -106,24 +111,20 @@ brew install libpcap
 ### Build
 
 ```bash
- g++ -g -Wall -Wextra -Wshadow src
-/main.cpp src/flow.cpp src/sniffer.cpp src/parser.cpp s
-rc/extractor.cpp -o netsentinal -lpcap
+g++ -O2 -Wall -Wextra -Wshadow src/main.cpp src/sniffer.cpp src/parser.cpp src/flow.cpp src/extractor.cpp -o netsentinal -lpcap
 ```
 
 ### Run
 
 ```bash
-# List available network interfaces
-sudo ./netsent
-
-# Capture from a specific interface (example: eth0)
-sudo ./netsent eth0
+# List available network interfaces and capture
+sudo ./netsentinal
 ```
 
 > **Note:** Packet capture requires root privileges. On Linux, you can alternatively grant `CAP_NET_RAW` capability to avoid using `sudo`:
 > ```bash
-> sudo setcap cap_net_raw=ep ./netsent
+> sudo setcap cap_net_raw=ep ./netsentinal
+> ./netsentinal
 > ```
 
 ---
@@ -197,19 +198,24 @@ sudo ./netsent eth0
 ```
 NetSentinel/
 ├── src/
-│   ├── sniffer.cpp          # Main capture loop and flow tracking
-│   ├── parser.cpp           # Protocol parsing (Ethernet, IPv4, TCP/UDP/ICMP)
-│   └── extractor.cpp        # Feature extraction from flows
+│   ├── main.cpp             # Interactive menu & capture event loop
+│   ├── sniffer.cpp          # Packet processing, display & throttled pruning
+│   ├── parser.cpp           # Protocol parsing (Ethernet, IPv4/IPv6, TCP/UDP/ICMP/ICMPv6)
+│   ├── flow.cpp             # FlowKey creation, flow table tracking, IP string formatting
+│   └── extractor.cpp        # 18-feature extraction & CSV export
 ├── include/
-│   └── sniffer.hpp          # Header definitions and data structures
-├── images/
-│   ├── network_capture_flow.png
-│   ├── ieee-802-3-ethernet-frame.png
-│   └── processpacket_pointer_memory_map.png
+│   ├── packet.hpp           # PacketInfo data abstraction & flags
+│   ├── flow.hpp             # FlowKey, Flow struct, FlowKeyHash & prune declarations
+│   ├── parser.hpp           # Parsing function declarations
+│   ├── sniffer.hpp          # Capture and live refresh declarations
+│   └── extractor.hpp        # FlowFeatures struct & CSV exporter declarations
+├── images/                  # Architecture & packet layout diagrams
 ├── Data/
-│   └── packet_data.csv      # Generated dataset (auto-created)
-├── README.md                # This file
-└── Makefile (optional)      # Build automation
+│   └── packet_data.csv      # Generated dataset (18 features)
+├── notes.md                 # Development notes & decision log
+├── todo.md                  # Project roadmap & completed tasks
+├── README.md                # Project documentation
+└── LICENSE                  # MIT License
 ```
 
 ---
@@ -476,48 +482,62 @@ A **network flow** represents a single conversation between two hosts. Instead o
 
 #### Flow Definition
 
-A flow is uniquely identified by a **5-tuple**:
-1. Source IP address
-2. Destination IP address
-3. Source port
-4. Destination port
-5. Protocol (TCP, UDP, ICMP)
+A flow is uniquely identified by a **5-tuple** with dual IPv4 and IPv6 support:
+1. Source IP address (IPv4 32-bit uint or IPv6 128-bit byte array)
+2. Destination IP address (IPv4 32-bit uint or IPv6 128-bit byte array)
+3. Source port (0 for ICMP/ICMPv6)
+4. Destination port (0 for ICMP/ICMPv6)
+5. Protocol (TCP=6, UDP=17, ICMP=1, ICMPv6=58)
 
 ```cpp
 struct FlowKey {
-    std::string srcIp;
-    std::string dstIp;
-    uint16_t srcPort;
-    uint16_t dstPort;
-    uint8_t protocol;
-    
-    // For use in std::unordered_map
+    bool isIPv6 = false;
+    uint32_t srcIp = 0;
+    uint32_t dstIp = 0;
+    uint8_t srcIp6[16] = {0};
+    uint8_t dstIp6[16] = {0};
+    uint16_t srcPort = 0;
+    uint16_t dstPort = 0;
+    uint8_t protocol = 0;
+
     bool operator==(const FlowKey& other) const {
-        return srcIp == other.srcIp &&
-               dstIp == other.dstIp &&
-               srcPort == other.srcPort &&
-               dstPort == other.dstPort &&
-               protocol == other.protocol;
+        if (isIPv6 != other.isIPv6 || protocol != other.protocol ||
+            srcPort != other.srcPort || dstPort != other.dstPort)
+            return false;
+        if (isIPv6)
+            return std::memcmp(srcIp6, other.srcIp6, 16) == 0 &&
+                   std::memcmp(dstIp6, other.dstIp6, 16) == 0;
+        return srcIp == other.srcIp && dstIp == other.dstIp;
     }
 };
 ```
 
 #### Flow State
 
-Each flow maintains running statistics:
+Each flow maintains running statistics and TCP flag distribution:
 
 ```cpp
 struct Flow {
-    FlowKey key;              // Unique identifier
-    uint64_t packetCount;     // Number of packets in this flow
-    uint64_t byteCount;       // Total bytes transferred
-    timeval firstSeen;        // Timestamp of first packet (microsecond precision)
-    timeval lastSeen;         // Timestamp of most recent packet (microsecond precision)
-    
-    // Derived metrics:
-    // duration = lastSeen - firstSeen
-    // avgPacketSize = byteCount / packetCount
-    // throughput = byteCount / duration
+    FlowKey key;
+    uint64_t startTimeUnixMs = 0;  // First packet capture Unix timestamp (ms)
+    int packet_counter = 0;        // Total packet count
+    int pack_len = 0;              // Most recent packet size (bytes)
+    timeval first_seen{};          // First packet microsecond timestamp
+    timeval last_seen{};           // Most recent packet microsecond timestamp
+    std::uint64_t total_bytes = 0; // Cumulative payload byte volume
+
+    // TCP flag counters
+    uint32_t synCount = 0;
+    uint32_t ackCount = 0;
+    uint32_t finCount = 0;
+    uint32_t rstCount = 0;
+    uint32_t pshCount = 0;
+    uint32_t urgCount = 0;
+
+    double duration() const {
+        return (last_seen.tv_sec - first_seen.tv_sec)
+             + (last_seen.tv_usec - first_seen.tv_usec) / 1000000.0;
+    }
 };
 ```
 
@@ -634,13 +654,13 @@ sudo dnf install gcc-c++ libpcap-devel
 
 ```bash
 # Basic compilation
-g++ -g -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp src/extractor.cpp -o netsent -lpcap
+g++ -g -Wall -Wextra -Wshadow src/main.cpp src/sniffer.cpp src/parser.cpp src/flow.cpp src/extractor.cpp -o netsentinal -lpcap
 
 # With optimizations for production
-g++ -O2 -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp src/extractor.cpp -o netsent -lpcap
+g++ -O2 -Wall -Wextra -Wshadow src/main.cpp src/sniffer.cpp src/parser.cpp src/flow.cpp src/extractor.cpp -o netsentinal -lpcap
 
-# With debugging symbols
-g++ -g -O2 -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp src/extractor.cpp -o netsent -lpcap
+# With debugging symbols and optimizations
+g++ -g -O2 -Wall -Wextra -Wshadow src/main.cpp src/sniffer.cpp src/parser.cpp src/flow.cpp src/extractor.cpp -o netsentinal -lpcap
 ```
 
 **Compiler Flags Explained:**
@@ -656,36 +676,50 @@ g++ -g -O2 -Wall -Wextra -Wshadow src/sniffer.cpp src/parser.cpp src/extractor.c
 
 ## Running the Project
 
-### List Available Interfaces
+### List Available Interfaces & Start Capture
 
 ```bash
-sudo ./netsent
+sudo ./netsentinal
 ```
 
 The program will display:
 ```
-Available network interfaces:
-0. lo (loopback)
-1. eth0 (Ethernet)
-2. wlan0 (Wireless)
+1). lo
+(no description)
+2). eth0
+(Intel Gigabit Adapter)
+3). wlan0
+(Wireless Interface)
 
-Select interface (0-2): 
-```
-
-### Capture from a Specific Interface
-
-```bash
-sudo ./netsent eth0
-```
-
-or
-
-```bash
-sudo ./netsent
-# Then enter the interface number when prompted
+Select capture device: 2
+Opening device: eth0
+Link-layer type: EN10MB
 ```
 
 ### Example Terminal Output
+
+```
+===== ACTIVE LIVE FLOWS =====
+Tracked unique streams: 3
+
+192.168.1.100:52341 -> 8.8.8.8:53 | Proto: 17 | Packets: 42
+   Start Time: 1700000000250 (Unix ms)
+   First Seen: 2026-08-21 13:20:00
+   Last Seen:  2026-08-21 13:20:02
+   Duration:   2.341500 sec
+   Avg Packet: 122.000 bytes
+   Throughput: 2188.34 Bps | 17.93 pps
+--------------------------------------------------------
+10.0.0.5:22 -> 192.168.1.50:54321 | Proto: 6 | Packets: 156
+   Start Time: 1700000010100 (Unix ms)
+   First Seen: 2026-08-21 13:20:10
+   Last Seen:  2026-08-21 13:20:55
+   Duration:   45.678900 sec
+   Avg Packet: 294.179 bytes
+   TCP Flags:  SYN=1 ACK=154 FIN=1 RST=0 PSH=32 URG=0
+   Throughput: 1004.66 Bps | 3.41 pps
+--------------------------------------------------------
+```
 
 ```
 NetSentinel - Real-time Network Flow Monitor
@@ -802,25 +836,34 @@ Completed implementation of flow lifecycle management with automatic feature ext
 
 ### Extracted Features
 
-The following features are extracted from each expired flow:
+The following 18 features are extracted from each completed/expired flow and exported to CSV:
 
-- **Flow duration** — Time elapsed from first to last packet (seconds)
-- **Packet count** — Total packets in the flow
-- **Total bytes** — Sum of all packet sizes
-- **Packets per second** — Throughput metric (packets / duration)
-- **Bytes per second** — Throughput metric (bytes / duration)
-- **Average packet size** — Mean packet size (bytes / packets)
-- **Source port** — Originating port number
-- **Destination port** — Target port number
-- **Protocol** — Transport protocol (TCP=6, UDP=17, ICMP=1)
+1. **startTimeUnixMs** — Unix epoch start timestamp in milliseconds (from libpcap `timeval`)
+2. **srcIp** — Originating IP address string (IPv4 dotted-decimal or IPv6 standard hex-colon)
+3. **dstIp** — Target IP address string (IPv4 dotted-decimal or IPv6 standard hex-colon)
+4. **srcPort** — Originating transport port (0 for ICMP/ICMPv6)
+5. **dstPort** — Target transport port (0 for ICMP/ICMPv6)
+6. **protocol** — IP protocol number (TCP=6, UDP=17, ICMP=1, ICMPv6=58)
+7. **duration** — Flow lifetime from first to last packet (seconds)
+8. **packets** — Total packet count in the flow
+9. **bytes** — Cumulative packet/payload bytes
+10. **packetsPerSecond** — Packet throughput rate (packets / max(duration, 0.001s))
+11. **bytesPerSecond** — Byte throughput rate (bytes / max(duration, 0.001s))
+12. **averagePacketSize** — Mean bytes per packet (bytes / packets)
+13. **synCount** — Total SYN packets in flow
+14. **ackCount** — Total ACK packets in flow
+15. **finCount** — Total FIN packets in flow
+16. **rstCount** — Total RST packets in flow
+17. **pshCount** — Total PSH packets in flow
+18. **urgCount** — Total URG packets in flow
 
 ### CSV Dataset Generation
 
 - Automatically creates a `Data/` directory if it does not exist
-- Automatically creates `packet_data.csv` with proper headers on first run
+- Automatically creates `packet_data.csv` with full 18-column header on first run
 - Writes CSV headers only once to prevent duplication
-- Appends completed flow records to the dataset
-- Prevents divide-by-zero issues in throughput calculations by checking flow duration
+- Appends completed flow records upon idle timeout expiration
+- Floored rate denominator (`MIN_DURATION_SEC = 0.001`) prevents `inf`/`nan` division on sub-millisecond bursts
 - Handles file I/O errors gracefully with informative messages
 
 ### Flow Processing Pipeline
@@ -828,85 +871,95 @@ The following features are extracted from each expired flow:
 ```
 libpcap
     ↓
-Packet Parser
+Packet Parser (Ethernet → IPv4/IPv6 → TCP/UDP/ICMP/ICMPv6)
     ↓
-PacketInfo
+PacketInfo (unified representation & TCP flags)
     ↓
-Flow Tracker
+Flow Tracker (FlowKey with hash_combine & 128-bit folding)
     ↓
-Flow Expiration Check
+Throttled Flow Expiration Check (1-second tick)
     ↓
-Feature Extractor
+Feature Extractor (18 statistical & flag features)
     ↓
-CSV Dataset
+CSV Dataset (Data/packet_data.csv)
 ```
 
-### Bug Fixes
+### Bug Fixes & Hardening
 
-- **Fixed incorrect byte counting** — byteCount now accurately tracks total payload bytes
-- **Fixed zero-duration flow calculations** — using `timeval` prevents division by zero
-- **Fixed throughput calculations** — proper handling of microsecond timestamps
-- **Fixed idle-flow deletion logic** — flows expire correctly based on configured timeout
-- **Improved timestamp precision** — microsecond-level accuracy for flow timing
+- **Fixed incorrect byte counting** — byteCount accurately accumulates incoming packet volume
+- **Fixed `inf`/`nan` rate bug** — rate denominators floored at 1ms (`0.001s`) to protect single burst flows
+- **Fixed zero-duration flow calculations** — microsecond `timeval` arithmetic prevents division by zero
+- **Fixed IPv4 stack uninitialized variable bug** — real IPv4 addresses preserved accurately
+- **Fixed flow collision under port scans** — Boost-style `hash_combine` algorithm gives 0 collisions across 1,000 sequential ports
+- **Throttled flow deletion** — `maybePruneFlows()` runs every 1 second, eliminating per-packet O(N) map traversal overhead
 
 ### Sample CSV Output
 
-```
-duration,packets,bytes,pps,bps,avgPacketSize,srcPort,dstPort,protocol
-2.543210,42,5124,16.50,2013.12,121.99,52341,53,17
-45.678901,156,45892,3.41,1005.02,294.31,22,54321,6
-12.345678,89,78432,7.20,6358.57,880.81,60123,443,6
+```csv
+startTimeUnixMs,srcIp,dstIp,srcPort,dstPort,protocol,duration,packets,bytes,packetsPerSecond,bytesPerSecond,averagePacketSize,synCount,ackCount,finCount,rstCount,pshCount,urgCount
+1700000000250,192.168.1.100,8.8.8.8,45000,80,6,0.100000,3,200,30.00,2000.00,66.67,1,2,1,0,1,0
+1700000010100,10.0.0.5,192.168.1.50,22,54321,6,45.678900,156,45892,3.41,1004.66,294.18,1,154,1,0,32,0
+1700000020500,2001:db8::1,2001:db8::2,54321,443,6,12.345678,89,78432,7.20,6358.57,880.81,1,88,1,0,15,0
 ```
 
 **Column Descriptions:**
 
-| Column | Type | Range | Notes |
-|--------|------|-------|-------|
-| duration | float | > 0 | Flow lifetime in seconds |
-| packets | int | ≥ 1 | Packet count |
-| bytes | int | ≥ 1 | Total payload bytes |
-| pps | float | ≥ 0 | Packets per second |
-| bps | float | ≥ 0 | Bytes per second |
-| avgPacketSize | float | > 0 | Average bytes per packet |
-| srcPort | int | 0-65535 | Source port (0 for ICMP) |
+| Column | Type | Range | Description |
+|--------|------|-------|-------------|
+| startTimeUnixMs | uint64 | Unix epoch ms | Flow start timestamp |
+| srcIp | string | IPv4 / IPv6 | Originating host address |
+| dstIp | string | IPv4 / IPv6 | Target host address |
+| srcPort | int | 0-65535 | Originating port (0 for ICMP) |
 | dstPort | int | 0-65535 | Destination port (0 for ICMP) |
-| protocol | int | 1,6,17 | ICMP=1, TCP=6, UDP=17 |
+| protocol | int | 1, 6, 17, 58 | Transport protocol number |
+| duration | float | ≥ 0 | Flow lifetime in seconds |
+| packets | int | ≥ 1 | Total packet count |
+| bytes | int | ≥ 1 | Total payload/frame bytes |
+| packetsPerSecond | float | ≥ 0 | Flow throughput (PPS) |
+| bytesPerSecond | float | ≥ 0 | Flow throughput (BPS) |
+| averagePacketSize | float | > 0 | Mean bytes per packet |
+| synCount | int | ≥ 0 | SYN flags observed |
+| ackCount | int | ≥ 0 | ACK flags observed |
+| finCount | int | ≥ 0 | FIN flags observed |
+| rstCount | int | ≥ 0 | RST flags observed |
+| pshCount | int | ≥ 0 | PSH flags observed |
+| urgCount | int | ≥ 0 | URG flags observed |
 
 ### Next Steps
 
 Future enhancements planned for flow feature extraction:
 
-- **TCP flag statistics** — SYN, ACK, FIN, RST counts and ratios
-- **Forward/backward flow statistics** — Directional packet and byte counts
-- **Inter-arrival time (IAT) features** — Mean, min, max, std dev of packet intervals
-- **Packet size statistics** — Distribution metrics for payload sizes
-- **Python ML integration** — Scikit-learn model training on exported datasets
-- **Real-time prediction pipeline** — Live anomaly scoring using trained models
+- **Forward/backward flow statistics** — Directional packet and byte counts (CICFlowMeter-compatible)
+- **Inter-arrival time (IAT) features** — Mean, min, max, std dev of packet arrival intervals
+- **Packet size statistics** — Distribution metrics for payload sizes (variance/std dev)
+- **Python ML integration** — Scikit-learn / XGBoost model training on exported datasets
+- **Real-time prediction pipeline** — Live anomaly scoring using ZeroMQ IPC bridge
 - **Prometheus/Grafana monitoring** — Metrics export and dashboard visualization
 
 ---
 
 ## Roadmap
 
-### Phase 1: Core Foundation ✅ (Completed)
-- [x] Packet capture and parsing
-- [x] Flow tracking with statistics
-- [x] Terminal dashboard
-- [x] Support for TCP, UDP, ICMP
-- [x] Flow expiration and cleanup
-- [x] Feature extraction
-- [x] CSV export
+### Phase 1: Core Foundation & IPv6 ✅ (Completed)
+- [x] Packet capture and parsing (Ethernet, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6)
+- [x] Unified PacketInfo abstraction & TCP flag parsing
+- [x] Flow tracking with microsecond precision & 128-bit IPv6 key support
+- [x] Collision-resistant port scan hashing (`hash_combine`)
+- [x] Terminal dashboard with real-time flag and flow stats
+- [x] Throttled flow expiration and cleanup (1s tick)
+- [x] 18-feature extraction & CSV export (`startTimeUnixMs`, IPs, TCP flags, throughput)
+- [x] Division-by-zero protection (`inf`/`nan` rate fix)
 
 ### Phase 2: Advanced Features 🔄 (In Progress)
-- [ ] TCP flag statistics
+- [x] TCP flag statistics (SYN, ACK, FIN, RST, PSH, URG counts)
 - [ ] Forward/backward flow analysis
 - [ ] Inter-arrival time (IAT) features
 - [ ] Packet size distribution metrics
 - [ ] ZeroMQ bridge for inter-process communication
 
 ### Phase 3: Machine Learning Integration 📋 (Planned)
-- [ ] Python ML pipeline for model training
-- [ ] XGBoost model for anomaly detection
+- [ ] Python ML pipeline for model training (`scripts/train_model.py`)
+- [ ] XGBoost / Random Forest model for anomaly detection
 - [ ] Feature normalization and scaling
 - [ ] Real-time threat scoring
 - [ ] Automated alerting system
@@ -1018,11 +1071,12 @@ Contributions are welcome! Please:
 
 ### Areas for Contribution
 
-- [ ] IPv6 support
-- [ ] Additional protocols (DNS, HTTP header extraction)
-- [ ] Performance optimizations
-- [ ] Documentation improvements
-- [ ] Test cases and CI/CD setup
+- [ ] Additional protocols (DNS query parsing, HTTP header extraction, TLS SNI)
+- [ ] Bi-directional flow aggregation (forward/backward statistics)
+- [ ] Python ML sidecar / ZeroMQ streaming bridge
+- [ ] Prometheus metrics exporter & Grafana dashboards
+- [ ] Offline .pcap replay support
+- [ ] Test cases, fuzzing, and CI/CD workflows
 
 ---
 
@@ -1049,6 +1103,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) file for 
 
 ---
 
+**Last Updated:** September 2026
 
 **Star ⭐ this project if it helps you!**
 
