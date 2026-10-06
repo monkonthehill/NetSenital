@@ -1,12 +1,17 @@
 #include "../include/extractor.hpp"
 #include <algorithm>
-#include <iostream>
+#include <atomic>
+#include <condition_variable>
+#include <cstring>
+#include <errno.h>
 #include <fstream>
+#include <iostream>
+#include <mutex>
+#include <queue>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <errno.h>
-#include <cstring>
+#include <thread>
 
 // Helper function to check if file exists
 bool fileExists(const std::string& filename) {
@@ -29,48 +34,130 @@ bool createDirectory(const std::string& path) {
     }
 }
 
+// ----------------------------------------------------------------------------
+// ASYNCHRONOUS BACKGROUND I/O WRITER
+// Separates disk writes from the high-priority packet capture thread.
+// ----------------------------------------------------------------------------
+class AsyncFeatureWriter {
+private:
+    std::queue<FlowFeatures> queue_;
+    std::mutex               mtx_;
+    std::condition_variable  cv_;
+    std::thread              worker_;
+    std::atomic<bool>        running_{false};
+
+    void workerLoop() {
+        std::string directory = "Data";
+        std::string filename  = directory + "/packet_data.csv";
+
+        if (!createDirectory(directory)) {
+            std::cerr << "Failed to create directory: " << directory << std::endl;
+            return;
+        }
+
+        bool isNewFile = !fileExists(filename);
+        std::ofstream csvFile(filename, std::ios::app);
+
+        if (!csvFile.is_open()) {
+            std::cerr << "Error: Unable to open file " << filename << std::endl;
+            return;
+        }
+
+        if (isNewFile) {
+            csvFile << "startTimeUnixMs,srcIp,dstIp,srcPort,dstPort,protocol,"
+                    << "duration,packets,bytes,packetsPerSecond,bytesPerSecond,"
+                    << "averagePacketSize,synCount,ackCount,finCount,rstCount,pshCount,urgCount,"
+                    << "fwd_packets,fwd_bytes,bwd_packets,bwd_bytes\n";
+            csvFile.flush();
+        }
+
+        while (true) {
+            std::vector<FlowFeatures> batch;
+            {
+                std::unique_lock<std::mutex> lock(mtx_);
+                cv_.wait(lock, [this] {
+                    return !queue_.empty() || !running_.load();
+                });
+
+                if (!running_.load() && queue_.empty()) {
+                    break;
+                }
+
+                // Drain all currently enqueued items in a single batch
+                while (!queue_.empty()) {
+                    batch.push_back(std::move(queue_.front()));
+                    queue_.pop();
+                }
+            }
+
+            // Perform batch disk writes in the background thread (hot capture thread is completely free!)
+            for (const auto& features : batch) {
+                csvFile << features.startTimeUnixMs << "," << features.srcIp << "," << features.dstIp << ","
+                        << features.srcPort << "," << features.dstPort << ","
+                        << static_cast<int>(features.protocol) << "," << features.duration << ","
+                        << features.packets << "," << features.bytes << "," << features.packetsPerSecond << ","
+                        << features.bytesPerSecond << "," << features.averagePacketSize << ","
+                        << features.synCount << "," << features.ackCount << "," << features.finCount << ","
+                        << features.rstCount << "," << features.pshCount << "," << features.urgCount << ","
+                        << features.fwd_packets << "," << features.fwd_bytes << ","
+                        << features.bwd_packets << "," << features.bwd_bytes << "\n";
+            }
+            csvFile.flush();
+        }
+
+        csvFile.close();
+    }
+
+public:
+    AsyncFeatureWriter() = default;
+
+    ~AsyncFeatureWriter() {
+        stop();
+    }
+
+    void start() {
+        if (!running_.load()) {
+            running_.store(true);
+            worker_ = std::thread(&AsyncFeatureWriter::workerLoop, this);
+        }
+    }
+
+    void stop() {
+        if (running_.load()) {
+            running_.store(false);
+            cv_.notify_all();
+            if (worker_.joinable()) {
+                worker_.join();
+            }
+        }
+    }
+
+    void enqueue(FlowFeatures features) {
+        if (!running_.load()) {
+            // Auto-start worker thread on first enqueue if not explicitly started
+            start();
+        }
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            queue_.push(std::move(features));
+        }
+        cv_.notify_one();
+    }
+};
+
+static AsyncFeatureWriter g_async_writer;
+
+void start_async_writer() {
+    g_async_writer.start();
+}
+
+void stop_async_writer() {
+    g_async_writer.stop();
+}
+
 void saveFeaturesToCSV(const FlowFeatures& features) {
-    // Define the directory and file path
-    std::string directory = "Data";
-    std::string filename  = directory + "/packet_data.csv";
-
-    // Create directory if it doesn't exist
-    if (!createDirectory(directory)) {
-        std::cerr << "Failed to create directory: " << directory << std::endl;
-        return;
-    }
-
-    // Check if file exists to determine if we need to write headers
-    bool isNewFile = !fileExists(filename);
-
-    // Open file in append mode
-    std::ofstream csvFile(filename, std::ios::app);
-
-    if (!csvFile.is_open()) {
-        std::cerr << "Error: Unable to open file " << filename << std::endl;
-        return;
-    }
-
-    // Write header if this is a new file
-    if (isNewFile) {
-        csvFile << "startTimeUnixMs,srcIp,dstIp,srcPort,dstPort,protocol,"
-                << "duration,packets,bytes,packetsPerSecond,bytesPerSecond,"
-                << "averagePacketSize,synCount,ackCount,finCount,rstCount,pshCount,urgCount,"
-                << "fwd_packets,fwd_bytes,bwd_packets,bwd_bytes\n";
-    }
-
-    // Write the data row
-    csvFile << features.startTimeUnixMs << "," << features.srcIp << "," << features.dstIp << ","
-            << features.srcPort << "," << features.dstPort << ","
-            << static_cast<int>(features.protocol) << "," << features.duration << ","
-            << features.packets << "," << features.bytes << "," << features.packetsPerSecond << ","
-            << features.bytesPerSecond << "," << features.averagePacketSize << ","
-            << features.synCount << "," << features.ackCount << "," << features.finCount << ","
-            << features.rstCount << "," << features.pshCount << "," << features.urgCount << ","
-            << features.fwd_packets << "," << features.fwd_bytes << ","
-            << features.bwd_packets << "," << features.bwd_bytes << "\n";
-
-    csvFile.close();
+    // Non-blocking enqueue to background worker
+    g_async_writer.enqueue(features);
 }
 
 void extract_features(const Flow& flow) {

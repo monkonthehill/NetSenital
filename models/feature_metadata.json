@@ -1,0 +1,27 @@
+{
+  "features": [
+    "srcPort",
+    "dstPort",
+    "protocol",
+    "duration",
+    "packets",
+    "bytes",
+    "packetsPerSecond",
+    "bytesPerSecond",
+    "averagePacketSize",
+    "synCount",
+    "ackCount",
+    "finCount",
+    "rstCount",
+    "pshCount",
+    "urgCount",
+    "fwd_packets",
+    "fwd_bytes",
+    "bwd_packets",
+    "bwd_bytes"
+  ],
+  "n_features": 19,
+  "target": "is_attack",
+  "rf_test_auc": 0.9999782428963055,
+  "xgb_test_auc": 0.9999782428963057
+}

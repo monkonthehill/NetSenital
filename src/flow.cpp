@@ -186,7 +186,8 @@ void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flow_table) {
         // Calculate how long this flow has been idle.
         double idle = std::difftime(now, it->second.last_seen.tv_sec);
 
-        if (idle >= 30) {
+        // Expire flows after 5 seconds of inactivity for responsive real-time analytics
+        if (idle >= 5) {
             // Note: extract_features() writes the extracted flow record directly to Data/packet_data.csv (void return)
             extract_features(it->second);
             it = flow_table.erase(it);

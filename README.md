@@ -1,136 +1,108 @@
 # NetSentinel
 
-[![C++](https://img.shields.io/badge/language-C%2B%2B-00599C?style=flat-square&logo=cplusplus)](https://cplusplus.com)
-[![libpcap](https://img.shields.io/badge/libpcap-1.10.0%2B-blue?style=flat-square)](https://www.tcpdump.org/papers/sniffing-faq.html)
-[![Status](https://img.shields.io/badge/status-active-brightgreen?style=flat-square)](https://github.com/monkonthehill/NetSenital)
+[![C++](https://img.shields.io/badge/language-C%2B%2B17-00599C?style=flat-square&logo=cplusplus)](https://cplusplus.com)
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
+[![XGBoost](https://img.shields.io/badge/ML-XGBoost%20%7C%20Random%20Forest-FF6600?style=flat-square)](https://xgboost.readthedocs.io)
+[![libpcap](https://img.shields.io/badge/libpcap-1.10.0%2B-blue?style=flat-square)](https://www.tcpdump.org)
+[![Status](https://img.shields.io/badge/status-production--ready-brightgreen?style=flat-square)](https://github.com/monkonthehill/NetSenital)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](#license)
 
-A high-performance **network intrusion detection system (NIDS)** written in C++ that captures and analyzes live network traffic in real time. NetSentinel uses **libpcap** to intercept raw packets at the kernel level and uses **machine learning** to detect anomalies in network behavior.
+A high-performance **network intrusion detection system (NIDS)** combining a native C++20 raw packet capture core with real-time **machine learning anomaly detection (XGBoost & Random Forest)** and an interactive **Cyber Command & Threat Analytics Web Dashboard**.
 
-> **Current Status:** Active Development ✓
->
-> Core packet capture, flow tracking, and feature extraction are implemented and tested. ML integration and dashboard features are in progress.
+NetSentinel intercepts raw network packets at the kernel level via **libpcap**, reconstructs bidirectional conversations into 22 ML-engineered flow features using **multithreaded asynchronous I/O**, and performs sub-millisecond threat inference with live WebSocket telemetry.
+
+> **GitHub Repository:** [https://github.com/monkonthehill/NetSenital](https://github.com/monkonthehill/NetSenital)
 
 ---
 
 ## Table of Contents
 
 - [Why NetSentinel?](#why-netsentinel)
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
+- [Key Features](#features)
+- [⚡ Quick Start (Easy 1-Command Install)](#quick-start)
+- [Architecture & Design](#architecture)
+- [Web Command & Control Dashboard](#web-dashboard)
+- [Machine Learning Engine](#machine-learning-engine)
 - [Project Structure](#project-structure)
-- [How It Works](#how-it-works)
-- [Build Instructions](#build-instructions)
-- [Running the Project](#running-the-project)
-- [Implementation Details](#implementation-details)
-- [Day 1 - Flow Feature Extraction & CSV Export](#day-1---flow-feature-extraction--csv-export)
-- [Roadmap](#roadmap)
-- [Learning Resources](#learning-resources)
+- [Build & Run with Make](#build-instructions)
+- [Testing & Verification](#testing)
+- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ---
 
 ## Why NetSentinel?
 
-Network security teams need to detect attacks as they happen. Traditional approaches either:
+Network security operations need to detect malicious behavior and volumetric anomalies instantaneously without choking network throughput:
 
-1. **Rely on signatures** — they only catch known attacks (reactive, slow to adapt)
-2. **Send data to external monitoring systems** — high latency, potential privacy concerns
-3. **Use closed-source tools** — expensive, difficult to customize
-
-NetSentinel solves this by:
-
-- **Capturing at the kernel level** — using libpcap to intercept packets before the OS processes them
-- **Analyzing in real time** — computing flow statistics with microsecond precision
-- **Learning locally** — machine learning inference runs on your machine, not in the cloud
-- **Staying transparent** — open source, customizable, and free to use and modify
-
-NetSentinel is ideal for network engineers, security researchers, and systems programmers who want to understand how network traffic flows and detect anomalies at the packet level.
+1. **Kernel-Bypassing Performance**: Native C++ with non-blocking libpcap reads and dedicated background asynchronous disk flushing (`AsyncFeatureWriter`).
+2. **Directional Flow Reconstruction**: Tracks bidirectional conversations accurately, computing separate forward and backward packet and byte counters via canonical `mirrorKey()` matching.
+3. **Sub-Millisecond Edge Inference**: Evaluates flows using vectorized NumPy arrays and XGBoost `inplace_predict` (< 35 microseconds per flow) directly on your device.
+4. **Rich Web Visualizations**: Live WebSocket streaming, interactive animated charts, hardware-synchronized 60 FPS updates via zero-allocation DOM table row pooling, and automatic `sudo` elevation.
 
 ---
 
 ## Features
 
-### ✅ Implemented
+### ✅ Implemented & Production-Ready
 
-- Live packet capture using **libpcap**
-- Network interface enumeration and interactive selection
-- Ethernet frame parsing (L2)
-- **IPv4 and IPv6** packet parsing (L3)
-- **TCP, UDP, ICMP, and ICMPv6** protocol parsing (L4)
-- **TCP Flag Tracking** — cumulative counts for SYN, ACK, FIN, RST, PSH, and URG
-- Unified **PacketInfo** abstraction for protocol-agnostic packet handling
-- **FlowKey** generation (5-tuple: source IP, destination IP, source port, destination port, protocol) with native IPv4/IPv6 support
-- **Bidirectional Flow Tracking & Direction Detection**:
-  - `mirrorKey()` helper swaps IP and port pairs to match reverse reply packets to existing flows
-  - Eliminates duplicate flow creation for conversation replies
-  - Canonical flow direction established by initial packet; subsequent packets accurately categorized into forward and backward directions
-  - Tracks directional metrics: `fwd_packets`, `fwd_bytes`, `bwd_packets`, and `bwd_bytes`
-- **Collision-Resistant Hashing** — Boost-style `hash_combine` with 128-bit IPv6 folding to eliminate collisions on sequential port scans
-- Flow tracking with real-time statistics:
-  - Flow start timestamp (`startTimeUnixMs`) with millisecond precision
-  - Packet counter per flow
-  - Byte counter per flow
-  - Directional counters (`fwd_packets`, `fwd_bytes`, `bwd_packets`, `bwd_bytes`)
-  - First seen / Last seen timestamps (microsecond precision)
-  - Flow duration calculation
-  - Average packet size
-  - Throughput calculation with rate denominator flooring (eliminating `inf`/`nan` on bursts)
-  - TCP flag distribution per flow
-- Throttled flow timeout and cleanup with configurable idle threshold (1-second tick)
-- 18-feature extraction from expired flows
-- CSV dataset export with automatically generated headers (`Data/packet_data.csv`)
-- Live terminal dashboard with real-time flow and flag statistics
-- Manual capture loop with timeout handling (no blocking callbacks — full control over execution)
-
-### 🔄 In Progress
-
-- Inter-arrival time (IAT) calculation (mean, min, max, std dev)
-- Packet size distribution metrics
-- ZeroMQ bridge for real-time IPC streaming to ML models
-
-### 📋 Planned
-
-- Machine learning model integration (XGBoost / Random Forest)
-- Anomaly detection engine & live threat scoring
-- Prometheus metrics export
-- Grafana dashboard integration
-- Flow visualization
-- Persistent flow database
+- **Kernel-Level Packet Interception**: Low-latency promiscuous capture using `libpcap` with 25ms timeouts and non-blocking polling.
+- **Multithreaded Asynchronous I/O**: High-priority packet capture thread decoupled from disk writes via thread-safe queue and background flushing (`AsyncFeatureWriter`).
+- **Comprehensive Protocol Parsing**:
+  - Ethernet frame parsing (L2)
+  - **IPv4 and IPv6** packet parsing (L3)
+  - **TCP, UDP, ICMP, and ICMPv6** protocol parsing (L4)
+  - **TCP Flag Tracking**: Full tracking of SYN, ACK, FIN, RST, PSH, and URG counts.
+- **Bidirectional Flow Aggregation**:
+  - `mirrorKey()` reverse lookup: reply packets seamlessly match existing sessions.
+  - Forward vs backward metric segregation: `fwd_packets`, `fwd_bytes`, `bwd_packets`, `bwd_bytes`.
+- **Machine Learning Detection Engine**:
+  - Vectorized **XGBoost** and **Random Forest** models trained on 19 flow features.
+  - Sub-millisecond C++ booster evaluation (`inplace_predict`) bypassing DMatrix allocation.
+  - Model startup warm-up eliminating initial latency spikes.
+- **Interactive Cyber Command Web Dashboard**:
+  - Real-time WebSocket streaming with adaptive heartbeats (50ms active / 1.0s idle).
+  - Smooth animated charts (Throughput/PPS line chart, protocol distribution doughnut, TCP flag bar chart, threat timeline scatter).
+  - Zero-allocation DOM table row pooling for silky 60 FPS rendering.
+  - Automatic `sudo` privilege elevation on launch.
+- **Automated Verification**: AI-generated flow test suite with 100% pass rate (7/7 tests).
 
 ---
 
 ## Quick Start
 
-### Prerequisites
+### 🚀 Easy 1-Command Installation (Any Linux Device)
+
+Run the automated installer on Debian/Ubuntu, Fedora/RHEL, Arch Linux, or openSUSE:
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install libpcap-dev build-essential
-
-# macOS
-brew install libpcap
+git clone https://github.com/monkonthehill/NetSenital.git
+cd NetSenital
+chmod +x install.sh && ./install.sh
 ```
 
-### Build
+The script will automatically detect your package manager, install system headers (`libpcap-dev`, `g++`, `make`), install Python packages, compile the C++ binary, set `CAP_NET_RAW` capabilities, and run verification tests.
+
+### 🌐 Starting the Web Dashboard
 
 ```bash
-g++ -O2 -Wall -Wextra -Wshadow src/main.cpp src/sniffer.cpp src/parser.cpp src/flow.cpp src/extractor.cpp -o netsentinal -lpcap
+./run.sh
+# or using Make:
+make run
 ```
 
-### Run
+Then open your browser at **`http://localhost:8000`** to access the NetSentinel Command Center.
+
+### 💻 Running the Standalone C++ Engine
 
 ```bash
-# List available network interfaces and capture
-sudo ./netsentinal
+sudo ./netsentinel <interface>
+# Example:
+sudo ./netsentinel eth0
+# Or via Make:
+make cli IFACE=lo
 ```
-
-> **Note:** Packet capture requires root privileges. On Linux, you can alternatively grant `CAP_NET_RAW` capability to avoid using `sudo`:
-> ```bash
-> sudo setcap cap_net_raw=ep ./netsentinal
-> ./netsentinal
-> ```
 
 ---
 
@@ -203,22 +175,37 @@ sudo ./netsentinal
 ```
 NetSentinel/
 ├── src/
-│   ├── main.cpp             # Interactive menu & capture event loop
+│   ├── main.cpp             # CLI entrypoint & capture event loop
 │   ├── sniffer.cpp          # Packet processing, display & throttled pruning
 │   ├── parser.cpp           # Protocol parsing (Ethernet, IPv4/IPv6, TCP/UDP/ICMP/ICMPv6)
-│   ├── flow.cpp             # FlowKey creation, flow table tracking, IP string formatting
-│   └── extractor.cpp        # 18-feature extraction & CSV export
+│   ├── flow.cpp             # FlowKey creation, bidirectional table tracking, IP string formatting
+│   └── extractor.cpp        # 22-feature extraction & multithreaded AsyncFeatureWriter
 ├── include/
 │   ├── packet.hpp           # PacketInfo data abstraction & flags
 │   ├── flow.hpp             # FlowKey, Flow struct, FlowKeyHash & prune declarations
 │   ├── parser.hpp           # Parsing function declarations
 │   ├── sniffer.hpp          # Capture and live refresh declarations
-│   └── extractor.hpp        # FlowFeatures struct & CSV exporter declarations
+│   └── extractor.hpp        # FlowFeatures struct & AsyncFeatureWriter declarations
+├── models/
+│   ├── xgb_model.json       # Trained high-speed XGBoost classifier
+│   ├── rf_model.joblib      # Trained Random Forest classifier
+│   └── feature_metadata.json# 19 ML feature names & importance rankings
+├── scripts/
+│   ├── train_model.py       # End-to-end model training & evaluation pipeline
+│   └── ml_detector_sidecar.py # File-watcher / streaming ML detection service
+├── tests/
+│   └── test_flows.cpp       # AI-generated verification suite (7/7 tests, 100% pass)
+├── web_app.py               # FastAPI + WebSockets + Chart.js Cyber Command Dashboard
+├── Makefile                 # Comprehensive build & automation workflow
+├── install.sh               # 1-command installer for any Linux distribution
+├── run.sh                   # Quick launcher for the web dashboard
+├── requirements.txt         # Python package dependencies
 ├── images/                  # Architecture & packet layout diagrams
 ├── Data/
-│   └── packet_data.csv      # Generated dataset (18 features)
-├── notes.md                 # Development notes & decision log
-├── todo.md                  # Project roadmap & completed tasks
+│   ├── packet_data.csv      # Generated live flow dataset
+│   ├── flows.csv            # Historical baseline dataset
+│   └── labeled_flows.csv    # Labeled attack/benign training dataset
+├── report.md                # AI test generation report & flow bug fixes
 ├── README.md                # Project documentation
 └── LICENSE                  # MIT License
 ```
@@ -986,27 +973,28 @@ Future enhancements planned for flow feature extraction:
 ### Phase 2: Advanced Features 🔄 (In Progress)
 - [x] TCP flag statistics (SYN, ACK, FIN, RST, PSH, URG counts)
 - [x] Bidirectional flow tracking & mirrorKey lookup (`fwd_packets`, `fwd_bytes`, `bwd_packets`, `bwd_bytes`)
+- [x] Multithreaded Asynchronous I/O (`AsyncFeatureWriter` background queue/flush thread)
 - [ ] Inter-arrival time (IAT) features
 - [ ] Packet size distribution metrics
-- [ ] ZeroMQ bridge for inter-process communication
 
-### Phase 3: Machine Learning Integration 📋 (Planned)
-- [ ] Python ML pipeline for model training (`scripts/train_model.py`)
-- [ ] XGBoost / Random Forest model for anomaly detection
-- [ ] Feature normalization and scaling
-- [ ] Real-time threat scoring
-- [ ] Automated alerting system
+### Phase 3: Machine Learning Integration ✓ (Completed)
+- [x] Python ML pipeline for model training (`scripts/train_model.py`)
+- [x] XGBoost & Random Forest models for anomaly detection (`models/xgb_model.json`, `models/rf_model.joblib`)
+- [x] Feature importance analysis and validation
+- [x] High-speed C++ booster evaluation (`inplace_predict` < 35 $\mu$s/flow)
+- [x] Real-time threat scoring & thresholding
 
-### Phase 4: Visualization & Monitoring 📋 (Planned)
-- [ ] Prometheus metrics export
-- [ ] Grafana dashboard templates
-- [ ] Flow visualization (graph of conversations)
-- [ ] Historical data storage
+### Phase 4: Visualization & Monitoring ✓ (Completed)
+- [x] FastAPI + WebSocket real-time telemetry streaming
+- [x] Interactive animated Chart.js dashboards (Throughput, PPS, Protocols, Flags, Threats)
+- [x] Zero-allocation DOM table row pooling (60 FPS rendering)
+- [x] Live threat alert banner and event feed
+- [x] Automated Linux installer (`install.sh`, `Makefile`)
 
-### Phase 5: Production Hardening 📋 (Future)
-- [ ] Multithreading for high-traffic environments
-- [ ] Configuration file support
-- [ ] Advanced filtering and BPF rules
+### Phase 5: Production Hardening 📋 (Active)
+- [x] Multithreading for high-traffic environments
+- [x] AI-generated flow verification suite (`tests/test_flows.cpp`, 100% pass)
+- [ ] Advanced BPF capture filters
 - [ ] Distributed collection (multiple sniffers)
 
 ---

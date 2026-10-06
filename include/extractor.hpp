@@ -29,7 +29,6 @@ struct FlowFeatures {
 
     double      averagePacketSize = 0.0;
 
-    // TCP flag counters
     uint32_t synCount = 0;
     uint32_t ackCount = 0;
     uint32_t finCount = 0;
@@ -37,3 +36,8 @@ struct FlowFeatures {
     uint32_t pshCount = 0;
     uint32_t urgCount = 0;
 };
+
+// Lifecycle controls for background asynchronous I/O thread
+void start_async_writer();
+void stop_async_writer();
+void saveFeaturesToCSV(const FlowFeatures& features);

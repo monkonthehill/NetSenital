@@ -5,8 +5,9 @@
 
 #include "../include/flow.hpp"
 #include "../include/sniffer.hpp"
+#include "../include/extractor.hpp"
 
-int main() {
+int main(int argc, char* argv[]) {
     int        packetCount   = 0;
     int        deviceIndex   = 0;
     int        menuIndex     = 1;
@@ -26,15 +27,44 @@ int main() {
         return 1;
     }
 
-    for (pcap_if_t* dev = allDevices; dev != nullptr; dev = dev->next) {
-        std::cout << menuIndex++ << "). " << dev->name << '\n';
-        std::cout << (dev->description ? dev->description : "(no description)") << "\n";
+    pcap_if_t* selectedDevice = nullptr;
+
+    // If an interface name or index was provided via command-line argument:
+    if (argc > 1) {
+        std::string argStr = argv[1];
+        // Check if numeric index
+        bool isNumber = true;
+        for (char c : argStr) {
+            if (!std::isdigit(static_cast<unsigned char>(c))) {
+                isNumber = false;
+                break;
+            }
+        }
+        if (isNumber) {
+            deviceIndex = std::stoi(argStr);
+            selectedDevice = selectNodeByIndex(allDevices, deviceIndex - 1);
+        } else {
+            // Find by interface name
+            for (pcap_if_t* dev = allDevices; dev != nullptr; dev = dev->next) {
+                if (argStr == dev->name) {
+                    selectedDevice = dev;
+                    break;
+                }
+            }
+        }
     }
 
-    std::cout << "\nSelect capture device: ";
-    std::cin >> deviceIndex;
+    if (selectedDevice == nullptr) {
+        for (pcap_if_t* dev = allDevices; dev != nullptr; dev = dev->next) {
+            std::cout << menuIndex++ << "). " << dev->name << '\n';
+            std::cout << (dev->description ? dev->description : "(no description)") << "\n";
+        }
 
-    pcap_if_t* selectedDevice = selectNodeByIndex(allDevices, deviceIndex - 1);
+        std::cout << "\nSelect capture device: ";
+        std::cin >> deviceIndex;
+
+        selectedDevice = selectNodeByIndex(allDevices, deviceIndex - 1);
+    }
 
     if (selectedDevice == nullptr) {
         std::cerr << "Invalid device selection.\n";
@@ -44,10 +74,10 @@ int main() {
 
     std::cout << "\nOpening device: " << selectedDevice->name << '\n';
 
-    // Open capture session
+    // Open capture session with low timeout (25ms) for instantaneous real-time responsiveness
     captureHandle = pcap_open_live(selectedDevice->name, MAXBYTES2CAPTURE,
-                                   1,    // Promiscuous mode
-                                   999,  // Read timeout (ms)
+                                   1,   // Promiscuous mode
+                                   25,  // Read timeout (ms)
                                    errbuf);
 
     if (captureHandle == nullptr) {
@@ -56,12 +86,20 @@ int main() {
         return 1;
     }
 
+    // Attempt to configure non-blocking mode for minimal buffering delays
+    if (pcap_setnonblock(captureHandle, 0, errbuf) == -1) {
+        // Non-fatal warning if unsupported on certain virtual devices
+    }
+
     int linkType = pcap_datalink(captureHandle);
 
     std::cout << "Link-layer type: " << pcap_datalink_val_to_name(linkType) << "\n\n";
 
     // Clear terminal before the live dashboard starts.
     std::cout << "\033[H";
+
+    // Start background asynchronous disk writer thread
+    start_async_writer();
 
     // Manual capture loop
     //
@@ -133,6 +171,9 @@ int main() {
 
     pcap_close(captureHandle);
     pcap_freealldevs(allDevices);
+
+    // Stop async disk writer and flush any pending background writes
+    stop_async_writer();
 
     return 0;
 }

@@ -1,0 +1,24 @@
+# Binaries and build outputs
+netsentinel
+netsentinal
+run_tests
+*.o
+*.a
+*.so
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+
+# Temporary / OS files
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
