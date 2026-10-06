@@ -12,28 +12,24 @@
 
 #include "../include/packet.hpp"
 
-struct FlowKey
-{
-    bool isIPv6 = false;
-    uint32_t srcIp = 0;
-    uint32_t dstIp = 0;
-    uint8_t srcIp6[16] = {0};
-    uint8_t dstIp6[16] = {0};
-    uint16_t srcPort = 0;
-    uint16_t dstPort = 0;
-    uint8_t protocol = 0;  // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP, 58=ICMPv6...)
+struct FlowKey {
+    bool     isIPv6     = false;
+    uint32_t srcIp      = 0;
+    uint32_t dstIp      = 0;
+    uint8_t  srcIp6[16] = {0};
+    uint8_t  dstIp6[16] = {0};
+    uint16_t srcPort    = 0;
+    uint16_t dstPort    = 0;
+    uint8_t  protocol   = 0;  // raw IP protocol number (6=TCP, 17=UDP, 1=ICMP, 58=ICMPv6...)
 
     // Overload the == operator for direct comparison
-    bool operator==(const FlowKey& other) const
-    {
-        if (isIPv6 != other.isIPv6 || protocol != other.protocol ||
-            srcPort != other.srcPort || dstPort != other.dstPort)
-        {
+    bool operator==(const FlowKey& other) const {
+        if (isIPv6 != other.isIPv6 || protocol != other.protocol || srcPort != other.srcPort ||
+            dstPort != other.dstPort) {
             return false;
         }
 
-        if (isIPv6)
-        {
+        if (isIPv6) {
             return std::memcmp(srcIp6, other.srcIp6, 16) == 0 &&
                    std::memcmp(dstIp6, other.dstIp6, 16) == 0;
         }
@@ -49,14 +45,13 @@ constexpr uint8_t TCP_PSH = 0x08;
 constexpr uint8_t TCP_ACK = 0x10;
 constexpr uint8_t TCP_URG = 0x20;
 
-struct Flow
-{
-    FlowKey key;
+struct Flow {
+    FlowKey  key;
     uint64_t startTimeUnixMs = 0;
-    int packet_counter = 0;
+    int      packet_counter  = 0;
 
     // Length (in bytes) of the most recent packet received in this flow
-    int pack_len = 0;
+    int     pack_len = 0;
 
     timeval first_seen{};
     timeval last_seen{};
@@ -72,57 +67,59 @@ struct Flow
     uint32_t pshCount = 0;
     uint32_t urgCount = 0;
 
-    void updateTcpFlags(uint8_t flags)
-    {
-        if (flags & TCP_SYN) synCount++;
-        if (flags & TCP_ACK) ackCount++;
-        if (flags & TCP_FIN) finCount++;
-        if (flags & TCP_RST) rstCount++;
-        if (flags & TCP_PSH) pshCount++;
-        if (flags & TCP_URG) urgCount++;
+    // NEW: Directional counters
+    uint32_t fwd_packets = 0;  // Forward direction packet count
+    uint32_t bwd_packets = 0;  // Backward direction packet count
+    uint64_t fwd_bytes   = 0;  // Forward direction byte count
+    uint64_t bwd_bytes   = 0;  // Backward direction byte count
+
+    void     updateTcpFlags(uint8_t flags) {
+        if (flags & TCP_SYN)
+            synCount++;
+        if (flags & TCP_ACK)
+            ackCount++;
+        if (flags & TCP_FIN)
+            finCount++;
+        if (flags & TCP_RST)
+            rstCount++;
+        if (flags & TCP_PSH)
+            pshCount++;
+        if (flags & TCP_URG)
+            urgCount++;
     }
 
-    double duration() const
-    {
-        return (last_seen.tv_sec - first_seen.tv_sec)
-             + (last_seen.tv_usec - first_seen.tv_usec) / 1000000.0;
+    double duration() const {
+        return (last_seen.tv_sec - first_seen.tv_sec) +
+               (last_seen.tv_usec - first_seen.tv_usec) / 1000000.0;
     }
 };
 
-namespace flow_detail
-{
-    template <typename T>
-    inline void hash_combine(std::size_t& seed, const T& val)
-    {
-        std::size_t h = std::hash<T>{}(val);
-        seed ^= h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
-    }
-
-    inline std::size_t hash_ipv6_bytes(const uint8_t ip6[16])
-    {
-        uint64_t high = 0, low = 0;
-        std::memcpy(&high, ip6, sizeof(uint64_t));
-        std::memcpy(&low, ip6 + sizeof(uint64_t), sizeof(uint64_t));
-        std::size_t seed = std::hash<uint64_t>{}(high);
-        hash_combine(seed, low);
-        return seed;
-    }
+namespace flow_detail {
+template <typename T>
+inline void hash_combine(std::size_t& seed, const T& val) {
+    std::size_t h = std::hash<T>{}(val);
+    seed ^= h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
 }
 
-struct FlowKeyHash
-{
-    std::size_t operator()(const FlowKey& key) const
-    {
+inline std::size_t hash_ipv6_bytes(const uint8_t ip6[16]) {
+    uint64_t high = 0, low = 0;
+    std::memcpy(&high, ip6, sizeof(uint64_t));
+    std::memcpy(&low, ip6 + sizeof(uint64_t), sizeof(uint64_t));
+    std::size_t seed = std::hash<uint64_t>{}(high);
+    hash_combine(seed, low);
+    return seed;
+}
+}  // namespace flow_detail
+
+struct FlowKeyHash {
+    std::size_t operator()(const FlowKey& key) const {
         std::size_t seed = 0;
         flow_detail::hash_combine(seed, key.isIPv6);
 
-        if (key.isIPv6)
-        {
+        if (key.isIPv6) {
             flow_detail::hash_combine(seed, flow_detail::hash_ipv6_bytes(key.srcIp6));
             flow_detail::hash_combine(seed, flow_detail::hash_ipv6_bytes(key.dstIp6));
-        }
-        else
-        {
+        } else {
             flow_detail::hash_combine(seed, key.srcIp);
             flow_detail::hash_combine(seed, key.dstIp);
         }
@@ -135,17 +132,26 @@ struct FlowKeyHash
     }
 };
 
+// NOTE: FlowKeyHash and FlowKey::operator== MUST stay in sync.
+// Both inspect and compare the exact same set of fields: isIPv6, srcIp/srcIp6,
+// dstIp/dstIp6, srcPort, dstPort, and protocol. If any field is added or altered,
+// both hash and equality implementations must be updated together.
+
 extern std::unordered_map<FlowKey, Flow, FlowKeyHash> flows;
 
-FlowKey makeFlowKey(const PacketInfo& info);
+FlowKey                                               makeFlowKey(const PacketInfo& info);
+FlowKey                                               mirrorKey(const FlowKey& key);
 
-std::string ipToString(uint32_t ipNetOrder);
-std::string getSrcIpStr(const FlowKey& key);
-std::string getDstIpStr(const FlowKey& key);
+std::string                                           ipToString(uint32_t ipNetOrder);
+std::string                                           getSrcIpStr(const FlowKey& key);
+std::string                                           getDstIpStr(const FlowKey& key);
 
-void createFlows(const FlowKey& key, int pack_len, const timeval& arrival_time, uint8_t tcpFlags = 0);
+void createFlows(const FlowKey& key, int pack_len, const timeval& arrival_time,
+                 uint8_t tcpFlags = 0);
 
 void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flow_table);
+
+bool isForwardPacket(const PacketInfo& info, const Flow& flow);
 
 void maybePruneFlows();
 

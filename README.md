@@ -62,11 +62,17 @@ NetSentinel is ideal for network engineers, security researchers, and systems pr
 - **TCP Flag Tracking** — cumulative counts for SYN, ACK, FIN, RST, PSH, and URG
 - Unified **PacketInfo** abstraction for protocol-agnostic packet handling
 - **FlowKey** generation (5-tuple: source IP, destination IP, source port, destination port, protocol) with native IPv4/IPv6 support
+- **Bidirectional Flow Tracking & Direction Detection**:
+  - `mirrorKey()` helper swaps IP and port pairs to match reverse reply packets to existing flows
+  - Eliminates duplicate flow creation for conversation replies
+  - Canonical flow direction established by initial packet; subsequent packets accurately categorized into forward and backward directions
+  - Tracks directional metrics: `fwd_packets`, `fwd_bytes`, `bwd_packets`, and `bwd_bytes`
 - **Collision-Resistant Hashing** — Boost-style `hash_combine` with 128-bit IPv6 folding to eliminate collisions on sequential port scans
 - Flow tracking with real-time statistics:
   - Flow start timestamp (`startTimeUnixMs`) with millisecond precision
   - Packet counter per flow
   - Byte counter per flow
+  - Directional counters (`fwd_packets`, `fwd_bytes`, `bwd_packets`, `bwd_bytes`)
   - First seen / Last seen timestamps (microsecond precision)
   - Flow duration calculation
   - Average packet size
@@ -80,7 +86,6 @@ NetSentinel is ideal for network engineers, security researchers, and systems pr
 
 ### 🔄 In Progress
 
-- Bi-directional flow statistics (forward/backward packet and byte counts)
 - Inter-arrival time (IAT) calculation (mean, min, max, std dev)
 - Packet size distribution metrics
 - ZeroMQ bridge for real-time IPC streaming to ML models
@@ -514,7 +519,7 @@ struct FlowKey {
 
 #### Flow State
 
-Each flow maintains running statistics and TCP flag distribution:
+Each flow maintains running statistics, directional metrics, and TCP flag distribution:
 
 ```cpp
 struct Flow {
@@ -534,6 +539,12 @@ struct Flow {
     uint32_t pshCount = 0;
     uint32_t urgCount = 0;
 
+    // Directional counters
+    uint32_t fwd_packets = 0;  // Forward direction packet count
+    uint32_t bwd_packets = 0;  // Backward direction packet count
+    uint64_t fwd_bytes   = 0;  // Forward direction byte count
+    uint64_t bwd_bytes   = 0;  // Backward direction byte count
+
     double duration() const {
         return (last_seen.tv_sec - first_seen.tv_sec)
              + (last_seen.tv_usec - first_seen.tv_usec) / 1000000.0;
@@ -547,59 +558,81 @@ struct Flow {
 Captured Packet (raw bytes)
         │
         ▼
-Parse Ethernet/IPv4/TCP/UDP/ICMP
+Parse Ethernet/IPv4/IPv6/TCP/UDP/ICMP
         │
         ▼
 Create PacketInfo object
         │
         ▼
-Extract 5-tuple fields
+Extract 5-tuple fields & Generate FlowKey
         │
         ▼
-Generate FlowKey
+Look up FlowKey in flowTable
         │
-        ▼
-Look up FlowKey in flow table
-        │
-    ┌───┴────┐
-    │        │
-   YES       NO
-    │        │
-    ▼        ▼
-Update   Create New
-Flow     Flow Entry
-Stats    & Insert
-    │        │
-    └───┬────┘
-        │
-        ▼
-Flow Tracker Updated
+    ┌───┴────────────────────────┐
+    │                            │
+   FOUND                     NOT FOUND
+    │                            │
+    │                   Look up mirrorKey(FlowKey)
+    │                            │
+    │                   ┌────────┴────────┐
+    │                   │                 │
+    │                 FOUND           NOT FOUND
+    │                   │                 │
+    ▼                   ▼                 ▼
+Update Flow         Update Flow       Create New Flow
+(isForward = true)  (isForward=false) (Canonical key,
+Update fwd_* stats  Update bwd_* stats fwd_packets=1)
+    │                   │                 │
+    └───────────────────┼─────────────────┘
+                        │
+                        ▼
+               Flow Table Updated
 ```
 
-#### Storage
+#### Storage & Bidirectional Lookup
 
-Flows are stored in an **`std::unordered_map`** for O(1) average lookup:
+Flows are stored in an **`std::unordered_map`** indexed by canonical `FlowKey`:
 
 ```cpp
-std::unordered_map<FlowKey, Flow, FlowKeyHash> flowTable;
+std::unordered_map<FlowKey, Flow, FlowKeyHash> flows;
 
 // When a packet arrives:
-FlowKey key = extractFlowKey(packetInfo);
+FlowKey key = makeFlowKey(packetInfo);
+bool isForward = true;
 
-if (flowTable.find(key) != flowTable.end()) {
-    // Flow exists - update statistics
-    flowTable[key].packetCount++;
-    flowTable[key].byteCount += packetInfo.totalSize;
-    flowTable[key].lastSeen = packetInfo.timestamp;
+auto it = flows.find(key);
+if (it == flows.end()) {
+    FlowKey revKey = mirrorKey(key);
+    it = flows.find(revKey);
+    if (it != flows.end()) {
+        isForward = false;
+    }
+}
+
+if (it != flows.end()) {
+    // Existing flow (forward or backward direction)
+    Flow& flow = it->second;
+    flow.packet_counter++;
+    flow.total_bytes += packLen;
+    flow.last_seen = arrivalTime;
+    flow.updateTcpFlags(packetInfo.tcpFlags);
+
+    if (isForward) {
+        flow.fwd_packets++;
+        flow.fwd_bytes += packLen;
+    } else {
+        flow.bwd_packets++;
+        flow.bwd_bytes += packLen;
+    }
 } else {
-    // New flow - create entry
+    // New canonical flow created and inserted via emplace
     Flow newFlow;
     newFlow.key = key;
-    newFlow.packetCount = 1;
-    newFlow.byteCount = packetInfo.totalSize;
-    newFlow.firstSeen = packetInfo.timestamp;
-    newFlow.lastSeen = packetInfo.timestamp;
-    flowTable[key] = newFlow;
+    // ... initialize timestamps & flags ...
+    newFlow.fwd_packets = 1;
+    newFlow.fwd_bytes = packLen;
+    flows.emplace(key, std::move(newFlow));
 }
 ```
 
@@ -952,7 +985,7 @@ Future enhancements planned for flow feature extraction:
 
 ### Phase 2: Advanced Features 🔄 (In Progress)
 - [x] TCP flag statistics (SYN, ACK, FIN, RST, PSH, URG counts)
-- [ ] Forward/backward flow analysis
+- [x] Bidirectional flow tracking & mirrorKey lookup (`fwd_packets`, `fwd_bytes`, `bwd_packets`, `bwd_bytes`)
 - [ ] Inter-arrival time (IAT) features
 - [ ] Packet size distribution metrics
 - [ ] ZeroMQ bridge for inter-process communication

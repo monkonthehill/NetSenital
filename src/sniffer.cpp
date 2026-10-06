@@ -29,31 +29,18 @@
 // packet.hpp and parser.cpp for why that split exists. `static` here
 // means this function is only visible inside this .cpp file — nothing
 // else needs to call it, so it doesn't need a header declaration.
-static void printPacketInfo(const PacketInfo& info)
-{
+static void printPacketInfo(const PacketInfo& info) {
     std::printf(
         "[eth] %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x | etherType 0x%04x\n",
-        info.srcMac[0],
-        info.srcMac[1],
-        info.srcMac[2],
-        info.srcMac[3],
-        info.srcMac[4],
-        info.srcMac[5],
-        info.dstMac[0],
-        info.dstMac[1],
-        info.dstMac[2],
-        info.dstMac[3],
-        info.dstMac[4],
-        info.dstMac[5],
-        info.etherType);
+        info.srcMac[0], info.srcMac[1], info.srcMac[2], info.srcMac[3], info.srcMac[4],
+        info.srcMac[5], info.dstMac[0], info.dstMac[1], info.dstMac[2], info.dstMac[3],
+        info.dstMac[4], info.dstMac[5], info.etherType);
 
-    if (!info.hasIPv4 && !info.hasIPv6)
-    {
+    if (!info.hasIPv4 && !info.hasIPv6) {
         return;
     }
 
-    if (info.hasIPv6)
-    {
+    if (info.hasIPv6) {
         char src6[INET6_ADDRSTRLEN];
         char dst6[INET6_ADDRSTRLEN];
 
@@ -62,34 +49,27 @@ static void printPacketInfo(const PacketInfo& info)
 
         std::printf("[ip]  %s -> %s | protocol %u | ttl %u\n", src6, dst6, info.protocol, info.ttl);
 
-        if (info.hasTransport)
-        {
-            if (info.protocol == 6)
-            {
-                std::printf("[l4]  port %u -> %u [flags:%s%s%s%s%s%s]\n",
-                    info.srcPort, info.dstPort,
-                    (info.tcpFlags & TCP_SYN) ? " SYN" : "",
-                    (info.tcpFlags & TCP_ACK) ? " ACK" : "",
-                    (info.tcpFlags & TCP_FIN) ? " FIN" : "",
-                    (info.tcpFlags & TCP_RST) ? " RST" : "",
-                    (info.tcpFlags & TCP_PSH) ? " PSH" : "",
-                    (info.tcpFlags & TCP_URG) ? " URG" : "");
-            }
-            else
-            {
+        if (info.hasTransport) {
+            if (info.protocol == 6) {
+                std::printf("[l4]  port %u -> %u [flags:%s%s%s%s%s%s]\n", info.srcPort,
+                            info.dstPort, (info.tcpFlags & TCP_SYN) ? " SYN" : "",
+                            (info.tcpFlags & TCP_ACK) ? " ACK" : "",
+                            (info.tcpFlags & TCP_FIN) ? " FIN" : "",
+                            (info.tcpFlags & TCP_RST) ? " RST" : "",
+                            (info.tcpFlags & TCP_PSH) ? " PSH" : "",
+                            (info.tcpFlags & TCP_URG) ? " URG" : "");
+            } else {
                 std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
             }
         }
 
-        if (info.hasICMPv6)
-        {
+        if (info.hasICMPv6) {
             std::printf("[icmp] type %u | code %u\n", info.icmpType, info.icmpCode);
         }
         return;
     }
 
-    if (info.hasIPv4)
-    {
+    if (info.hasIPv4) {
         in_addr srcAddr, dstAddr;
         srcAddr.s_addr = htonl(info.srcIp);
         dstAddr.s_addr = htonl(info.dstIp);
@@ -102,27 +82,21 @@ static void printPacketInfo(const PacketInfo& info)
 
         std::printf("[ip]  %s -> %s | protocol %u | ttl %u\n", src, dst, info.protocol, info.ttl);
 
-        if (info.hasTransport)
-        {
-            if (info.protocol == 6)
-            {
-                std::printf("[l4]  port %u -> %u [flags:%s%s%s%s%s%s]\n",
-                    info.srcPort, info.dstPort,
-                    (info.tcpFlags & TCP_SYN) ? " SYN" : "",
-                    (info.tcpFlags & TCP_ACK) ? " ACK" : "",
-                    (info.tcpFlags & TCP_FIN) ? " FIN" : "",
-                    (info.tcpFlags & TCP_RST) ? " RST" : "",
-                    (info.tcpFlags & TCP_PSH) ? " PSH" : "",
-                    (info.tcpFlags & TCP_URG) ? " URG" : "");
-            }
-            else
-            {
+        if (info.hasTransport) {
+            if (info.protocol == 6) {
+                std::printf("[l4]  port %u -> %u [flags:%s%s%s%s%s%s]\n", info.srcPort,
+                            info.dstPort, (info.tcpFlags & TCP_SYN) ? " SYN" : "",
+                            (info.tcpFlags & TCP_ACK) ? " ACK" : "",
+                            (info.tcpFlags & TCP_FIN) ? " FIN" : "",
+                            (info.tcpFlags & TCP_RST) ? " RST" : "",
+                            (info.tcpFlags & TCP_PSH) ? " PSH" : "",
+                            (info.tcpFlags & TCP_URG) ? " URG" : "");
+            } else {
                 std::printf("[l4]  port %u -> %u\n", info.srcPort, info.dstPort);
             }
         }
 
-        if (info.hasICMP)
-        {
+        if (info.hasICMP) {
             std::printf("[icmp] type %u | code %u\n", info.icmpType, info.icmpCode);
         }
         return;
@@ -171,12 +145,10 @@ constexpr auto UI_REFRESH_INTERVAL_MS = std::chrono::milliseconds(200);
 // the same clock as the packet-arrival path (hasPacket == true, real
 // counter/length/info to show), so the display now ticks steadily
 // regardless of whether traffic is flowing.
-void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const PacketInfo* info)
-{
+void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const PacketInfo* info) {
     auto now = std::chrono::steady_clock::now();
 
-    if (now - last_ui_update < UI_REFRESH_INTERVAL_MS)
-    {
+    if (now - last_ui_update < UI_REFRESH_INTERVAL_MS) {
         return;
     }
 
@@ -195,8 +167,7 @@ void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const 
 
     std::printf("Packet count : %d\n", counterValue);
 
-    if (hasPacket && info != nullptr)
-    {
+    if (hasPacket && info != nullptr) {
         std::printf("Packet length : %d\n", packetLen);
 
         printPacketInfo(*info);
@@ -205,18 +176,17 @@ void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const 
     // Flush output stream to avoid terminal rendering delays
     std::cout << std::flush;
 
-   last_ui_update = now;
+    last_ui_update = now;
 }
 
-void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char* packet)
-{
+void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
     //*packet stores the adress of the first byte of contiguous block of bytes.
     // reinterpret_cast is preferred because it makes the conversion explicit.
     // C-style casts can perform multiple kinds of casts implicitly, making
     // code harder to understand and potentially less safe.
     const timeval& arrival_time = pkthdr->ts;
 
-    int* counter = reinterpret_cast<int*>(arg);
+    int*           counter      = reinterpret_cast<int*>(arg);
 
     // Track statistics and parse incoming data silently
 
@@ -236,8 +206,7 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // new Flow and stores it in the global flow list. This lays the foundation
     // for maintaining per-flow statistics instead of treating every packet
     // independently.
-    if ((info.hasIPv4 || info.hasIPv6) && (info.hasTransport || info.hasICMP || info.hasICMPv6))
-    {
+    if ((info.hasIPv4 || info.hasIPv6) && (info.hasTransport || info.hasICMP || info.hasICMPv6)) {
         FlowKey newKey = makeFlowKey(info);
 
         createFlows(newKey, pkthdr->len, arrival_time, info.tcpFlags);
@@ -253,22 +222,18 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     return;
 }
 
-pcap_if_t* selectNodeByIndex(pcap_if_t* head, int targetIndex)
-{
+pcap_if_t* selectNodeByIndex(pcap_if_t* head, int targetIndex) {
     // 1. Handle negative index input
-    if (targetIndex < 0)
-    {
+    if (targetIndex < 0) {
         return nullptr;
     }
 
-    pcap_if_t* current = head;
-    int currentIndex   = 0;
+    pcap_if_t* current      = head;
+    int        currentIndex = 0;
 
     // 2. Loop until the list ends or we reach the target index
-    while (current != nullptr)
-    {
-        if (currentIndex == targetIndex)
-        {
+    while (current != nullptr) {
+        if (currentIndex == targetIndex) {
             return current;  // Node selected and returned
         }
         currentIndex++;
