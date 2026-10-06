@@ -55,17 +55,20 @@ void saveFeaturesToCSV(const FlowFeatures& features) {
     if (isNewFile) {
         csvFile << "startTimeUnixMs,srcIp,dstIp,srcPort,dstPort,protocol,"
                 << "duration,packets,bytes,packetsPerSecond,bytesPerSecond,"
-                << "averagePacketSize,synCount,ackCount,finCount,rstCount,pshCount,urgCount\n";
+                << "averagePacketSize,synCount,ackCount,finCount,rstCount,pshCount,urgCount,"
+                << "fwd_packets,fwd_bytes,bwd_packets,bwd_bytes\n";
     }
 
     // Write the data row
     csvFile << features.startTimeUnixMs << "," << features.srcIp << "," << features.dstIp << ","
-            << features.srcPort << "," << features.dstPort << "," << features.isForward << ","
+            << features.srcPort << "," << features.dstPort << ","
             << static_cast<int>(features.protocol) << "," << features.duration << ","
             << features.packets << "," << features.bytes << "," << features.packetsPerSecond << ","
             << features.bytesPerSecond << "," << features.averagePacketSize << ","
             << features.synCount << "," << features.ackCount << "," << features.finCount << ","
-            << features.rstCount << "," << features.pshCount << "," << features.urgCount << "\n";
+            << features.rstCount << "," << features.pshCount << "," << features.urgCount << ","
+            << features.fwd_packets << "," << features.fwd_bytes << ","
+            << features.bwd_packets << "," << features.bwd_bytes << "\n";
 
     csvFile.close();
 }
@@ -87,6 +90,11 @@ void extract_features(const Flow& flow) {
     features.duration                 = duration;
     features.packets                  = flow.packet_counter;
     features.bytes                    = flow.total_bytes;
+
+    features.fwd_packets              = flow.fwd_packets;
+    features.fwd_bytes                = flow.fwd_bytes;
+    features.bwd_packets              = flow.bwd_packets;
+    features.bwd_bytes                = flow.bwd_bytes;
 
     features.packetsPerSecond         = static_cast<double>(flow.packet_counter) / rateDuration;
     features.bytesPerSecond           = static_cast<double>(flow.total_bytes) / rateDuration;

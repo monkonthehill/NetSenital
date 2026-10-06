@@ -151,6 +151,7 @@ void createFlows(const FlowKey& key, int pack_len, const timeval& arrival_time,
 
 void delete_flow(std::unordered_map<FlowKey, Flow, FlowKeyHash>& flow_table);
 
+bool isForwardPacket(const PacketInfo& info, const FlowKey& flowKey);
 bool isForwardPacket(const PacketInfo& info, const Flow& flow);
 
 void maybePruneFlows();

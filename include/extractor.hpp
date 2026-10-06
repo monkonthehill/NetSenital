@@ -18,6 +18,12 @@ struct FlowFeatures {
     uint32_t    packets           = 0;
     uint64_t    bytes             = 0;
 
+    // Bi-directional statistics
+    uint32_t    fwd_packets       = 0;
+    uint64_t    fwd_bytes         = 0;
+    uint32_t    bwd_packets       = 0;
+    uint64_t    bwd_bytes         = 0;
+
     double      packetsPerSecond  = 0.0;
     double      bytesPerSecond    = 0.0;
 

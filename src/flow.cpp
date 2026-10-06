@@ -101,19 +101,27 @@ FlowKey mirrorKey(const FlowKey& k) {
 // We now pass the complete timeval instead of only time_t.
 // This preserves microsecond precision provided by libpcap.
 
+// Check if this packet is traveling in the forward direction
+// (matches the canonical flow direction established by the first packet)
+bool isForwardPacket(const PacketInfo& info, const FlowKey& flowKey) {
+    if (flowKey.isIPv6) {
+        return std::memcmp(info.srcIp6, flowKey.srcIp6, 16) == 0 &&
+               std::memcmp(info.dstIp6, flowKey.dstIp6, 16) == 0 &&
+               info.srcPort == flowKey.srcPort &&
+               info.dstPort == flowKey.dstPort;
+    } else {
+        return info.srcIp == flowKey.srcIp &&
+               info.dstIp == flowKey.dstIp &&
+               info.srcPort == flowKey.srcPort &&
+               info.dstPort == flowKey.dstPort;
+    }
+}
+
 // NOTE: Direction check compares incoming packet info against the matching flow's
 // stored canonical FlowKey (`flow.key`). Returns true if packet matches the original
 // flow direction, or false if it is a reply / reverse packet.
 bool isForwardPacket(const PacketInfo& info, const Flow& flow) {
-    if (flow.key.isIPv6) {
-        return std::memcmp(info.srcIp6, flow.key.srcIp6, 16) == 0 &&
-               std::memcmp(info.dstIp6, flow.key.dstIp6, 16) == 0 &&
-               info.srcPort == flow.key.srcPort &&
-               info.dstPort == flow.key.dstPort;
-    } else {
-        return info.srcIp == flow.key.srcIp && info.dstIp == flow.key.dstIp &&
-               info.srcPort == flow.key.srcPort && info.dstPort == flow.key.dstPort;
-    }
+    return isForwardPacket(info, flow.key);
 }
 
 // NOTES: createFlows handles bidirectional flow association. It searches for `key`,
