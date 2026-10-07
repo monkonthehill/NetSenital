@@ -20,8 +20,23 @@ TEST_BIN := run_tests
 PYTHON   := python3
 PIP      := pip3
 
-# Default interface for CLI capture
-IFACE    ?= lo
+# Detect operating system (Darwin for macOS, Linux for Linux)
+UNAME_S  := $(shell uname -s)
+
+# Platform-specific defaults and compiler / linker flags
+ifeq ($(UNAME_S),Darwin)
+    # macOS defaults: lo0 for loopback, en0 for Wi-Fi
+    IFACE ?= lo0
+    # Auto-detect Homebrew prefix for libpcap headers / libraries if installed via brew
+    BREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
+    ifneq ($(wildcard $(BREW_PREFIX)/opt/libpcap/include),)
+        CXXFLAGS += -I$(BREW_PREFIX)/opt/libpcap/include
+        LDFLAGS  += -L$(BREW_PREFIX)/opt/libpcap/lib
+    endif
+else
+    # Default interface for Linux CLI capture
+    IFACE ?= lo
+endif
 
 .PHONY: all build test install-deps setup run dashboard cli train clean help
 
@@ -43,7 +58,18 @@ $(TEST_BIN): $(TEST_SRC)
 	$(CXX) $(CXXFLAGS) $(TEST_SRC) -o $(TEST_BIN) $(LDFLAGS)
 
 install-deps:
-	@echo "==> Detecting Linux package manager and installing dependencies..."
+	@echo "==> Detecting package manager and installing dependencies..."
+ifeq ($(UNAME_S),Darwin)
+	@if command -v brew >/dev/null 2>&1; then \
+		echo "Found Homebrew (macOS)..."; \
+		brew install libpcap python3; \
+	elif command -v port >/dev/null 2>&1; then \
+		echo "Found MacPorts (macOS)..."; \
+		sudo port install libpcap python311; \
+	else \
+		echo "Warning: Homebrew not found. Please install Homebrew (https://brew.sh) or ensure libpcap and python3 are installed."; \
+	fi
+else
 	@if command -v apt-get >/dev/null 2>&1; then \
 		echo "Found apt-get (Debian/Ubuntu)..."; \
 		sudo apt-get update && sudo apt-get install -y build-essential g++ libpcap-dev python3 python3-pip python3-venv; \
@@ -59,6 +85,7 @@ install-deps:
 	else \
 		echo "Warning: Could not detect known package manager. Please ensure g++, libpcap-dev, and python3-pip are installed."; \
 	fi
+endif
 	@echo "==> Installing Python requirements..."
 	$(PIP) install -r requirements.txt --break-system-packages 2>/dev/null || $(PIP) install -r requirements.txt || true
 	@echo "==> Dependencies installation complete!"
@@ -66,8 +93,13 @@ install-deps:
 setup: install-deps build
 	@echo "==> Creating required directories..."
 	@mkdir -p Data models
+ifeq ($(UNAME_S),Darwin)
+	@echo "==> macOS detected: Raw packet capture requires BPF permissions (/dev/bpf*)."
+	@echo "    Run NetSentinel with sudo (or configure /dev/bpf permissions)."
+else
 	@echo "==> Attempting to set CAP_NET_RAW capability on $(TARGET)..."
 	@-sudo setcap cap_net_raw=ep $(TARGET) 2>/dev/null || true
+endif
 	@echo "==> Running verification tests..."
 	@$(MAKE) test
 	@echo ""

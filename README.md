@@ -2,13 +2,14 @@
 
 [![C++](https://img.shields.io/badge/language-C%2B%2B17-00599C?style=flat-square&logo=cplusplus)](https://cplusplus.com)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python)](https://python.org)
+[![OS](https://img.shields.io/badge/OS-Linux%20%7C%20macOS-informational?style=flat-square&logo=apple)](https://apple.com)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![XGBoost](https://img.shields.io/badge/ML-XGBoost%20%7C%20Random%20Forest-FF6600?style=flat-square)](https://xgboost.readthedocs.io)
 [![libpcap](https://img.shields.io/badge/libpcap-1.10.0%2B-blue?style=flat-square)](https://www.tcpdump.org)
 [![Status](https://img.shields.io/badge/status-production--ready-brightgreen?style=flat-square)](https://github.com/monkonthehill/NetSenital)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](#license)
 
-A high-performance **network intrusion detection system (NIDS)** combining a native C++20 raw packet capture core with real-time **machine learning anomaly detection (XGBoost & Random Forest)** and an interactive **Cyber Command & Threat Analytics Web Dashboard**.
+A high-performance **network intrusion detection system (NIDS)** combining a native C++ raw packet capture core with real-time **machine learning anomaly detection (XGBoost & Random Forest)** and an interactive **Cyber Command & Threat Analytics Web Dashboard**, fully compatible with both **Linux** and **macOS**.
 
 NetSentinel intercepts raw network packets at the kernel level via **libpcap**, reconstructs bidirectional conversations into 22 ML-engineered flow features using **multithreaded asynchronous I/O**, and performs sub-millisecond threat inference with live WebSocket telemetry.
 
@@ -40,6 +41,7 @@ Network security operations need to detect malicious behavior and volumetric ano
 2. **Directional Flow Reconstruction**: Tracks bidirectional conversations accurately, computing separate forward and backward packet and byte counters via canonical `mirrorKey()` matching.
 3. **Sub-Millisecond Edge Inference**: Evaluates flows using vectorized NumPy arrays and XGBoost `inplace_predict` (< 35 microseconds per flow) directly on your device.
 4. **Rich Web Visualizations**: Live WebSocket streaming, interactive animated charts, hardware-synchronized 60 FPS updates via zero-allocation DOM table row pooling, and automatic `sudo` elevation.
+5. **Full macOS & Linux Cross-Platform Compatibility**: Seamless native operation across Debian, Ubuntu, Fedora, Arch, and Apple macOS (Apple Silicon M-series & Intel).
 
 ---
 
@@ -47,10 +49,15 @@ Network security operations need to detect malicious behavior and volumetric ano
 
 ### ✅ Implemented & Production-Ready
 
+- **Cross-Platform Architecture (Linux & macOS)**:
+  - Native compilation on Linux (GCC/Clang) and macOS Darwin (Apple Clang/GCC).
+  - Portable BSD/Linux network header adaptation (`th_sport`, `uh_sport`, `ether_header`).
+  - Supports both Ethernet framing (`DLT_EN10MB` on Linux/macOS NICs) and BSD loopback encapsulation (`DLT_NULL` / `DLT_LOOP` on macOS `lo0`).
+  - Dynamic multi-platform shared library loader for libpcap (`.so` on Linux, `.dylib` on macOS).
 - **Kernel-Level Packet Interception**: Low-latency promiscuous capture using `libpcap` with 25ms timeouts and non-blocking polling.
 - **Multithreaded Asynchronous I/O**: High-priority packet capture thread decoupled from disk writes via thread-safe queue and background flushing (`AsyncFeatureWriter`).
 - **Comprehensive Protocol Parsing**:
-  - Ethernet frame parsing (L2)
+  - Ethernet frame parsing (L2) & BSD Loopback parsing
   - **IPv4 and IPv6** packet parsing (L3)
   - **TCP, UDP, ICMP, and ICMPv6** protocol parsing (L4)
   - **TCP Flag Tracking**: Full tracking of SYN, ACK, FIN, RST, PSH, and URG counts.
@@ -72,9 +79,9 @@ Network security operations need to detect malicious behavior and volumetric ano
 
 ## Quick Start
 
-### 🚀 Easy 1-Command Installation (Any Linux Device)
+### 🚀 Easy 1-Command Installation (Linux & macOS)
 
-Run the automated installer on Debian/Ubuntu, Fedora/RHEL, Arch Linux, or openSUSE:
+Run the automated installer on **Debian/Ubuntu, Fedora/RHEL, Arch Linux, openSUSE, or macOS**:
 
 ```bash
 git clone https://github.com/monkonthehill/NetSenital.git
@@ -82,7 +89,10 @@ cd NetSenital
 chmod +x install.sh && ./install.sh
 ```
 
-The script will automatically detect your package manager, install system headers (`libpcap-dev`, `g++`, `make`), install Python packages, compile the C++ binary, set `CAP_NET_RAW` capabilities, and run verification tests.
+- **Linux**: Automatically installs build essentials, `libpcap-dev`, Python dependencies, configures `CAP_NET_RAW` capabilities, and compiles the C++ engine.
+- **macOS**: Detects Homebrew (`brew install libpcap python3`), configures clang++/g++ include and library search paths, compiles the core engine, and runs verification tests.
+
+> **macOS Prerequisites:** Ensure Xcode Command Line Tools are installed (`xcode-select --install`) and [Homebrew](https://brew.sh) is available (`brew install libpcap`).
 
 ### 🌐 Starting the Web Dashboard
 
@@ -97,11 +107,17 @@ Then open your browser at **`http://localhost:8000`** to access the NetSentinel 
 ### 💻 Running the Standalone C++ Engine
 
 ```bash
-sudo ./netsentinel <interface>
-# Example:
+# On Linux:
 sudo ./netsentinel eth0
-# Or via Make:
+# or via Make:
 make cli IFACE=lo
+
+# On macOS:
+sudo ./netsentinel en0   # primary Wi-Fi / Ethernet
+# or for loopback capture:
+sudo ./netsentinel lo0
+# or via Make:
+make cli IFACE=lo0
 ```
 
 ---
@@ -758,22 +774,39 @@ Flow ID                                      | Packets | Bytes    | Duration | T
 - **Ctrl+C** — Stop capture and exit
 - **Space** — Pause/resume capture (when implemented)
 
-### Running Without sudo (Linux)
+### Packet Capture Permissions
 
-To run without `sudo`, grant the capability to the binary:
+#### Linux: Running Without sudo
+To run on Linux without `sudo`, grant the raw socket capability to the binary:
 
 ```bash
-sudo setcap cap_net_raw=ep ./netsent
-./netsent  # No sudo needed
+sudo setcap cap_net_raw=ep ./netsentinel
+./netsentinel  # No sudo needed
 ```
 
 To check if the capability is set:
 ```bash
-getcap ./netsent
-# Output: ./netsent = cap_net_raw+ep
+getcap ./netsentinel
+# Output: ./netsentinel = cap_net_raw+ep
 ```
 
-> **Security Note:** Granting `CAP_NET_RAW` allows the process to capture all network traffic. Only do this for trusted binaries.
+#### macOS: BPF Permissions
+On macOS, packet capture operates through BSD Packet Filter devices (`/dev/bpf*`).
+By default, macOS restricts `/dev/bpf*` to root:
+
+- **Option 1 (Recommended)**: Run with `sudo`:
+  ```bash
+  sudo ./netsentinel en0
+  # or launch web dashboard (auto-elevates):
+  ./run.sh
+  ```
+- **Option 2 (Non-root capture)**: Adjust `/dev/bpf*` read/write permissions:
+  ```bash
+  sudo chmod 666 /dev/bpf*
+  ```
+  *(Or use Wireshark's ChmodBPF daemon to preserve permissions across macOS reboots).*
+
+> **Security Note:** Granting raw capture access allows processes to observe network traffic. Only do this for trusted binaries and users.
 
 ---
 
@@ -989,7 +1022,8 @@ Future enhancements planned for flow feature extraction:
 - [x] Interactive animated Chart.js dashboards (Throughput, PPS, Protocols, Flags, Threats)
 - [x] Zero-allocation DOM table row pooling (60 FPS rendering)
 - [x] Live threat alert banner and event feed
-- [x] Automated Linux installer (`install.sh`, `Makefile`)
+- [x] Automated Linux & macOS installer (`install.sh`, `Makefile`)
+- [x] macOS Darwin native compatibility (BSD headers, DLT_NULL loopback, dylib loading)
 
 ### Phase 5: Production Hardening 📋 (Active)
 - [x] Multithreading for high-traffic environments
@@ -1003,37 +1037,48 @@ Future enhancements planned for flow feature extraction:
 
 ### "Permission denied" error
 
-**Cause:** Packet capture requires root privileges.
+**Cause:** Packet capture requires root privileges or device access.
 
 **Solution:**
 ```bash
+# On macOS:
+sudo ./netsentinel en0   # Wi-Fi / Ethernet
+sudo ./netsentinel lo0   # Localhost loopback
+# Or adjust BPF device permissions:
+sudo chmod 666 /dev/bpf*
+
+# On Linux:
 # Option 1: Run with sudo
-sudo ./netsent
+sudo ./netsentinel eth0
 
 # Option 2: Grant capability (Linux only)
-sudo setcap cap_net_raw=ep ./netsent
-./netsent
+sudo setcap cap_net_raw=ep ./netsentinel
+./netsentinel
 ```
 
 ### "No such device" error
 
-**Cause:** The specified interface doesn't exist.
+**Cause:** The specified interface doesn't exist on this operating system.
 
 **Solution:**
 ```bash
-# List available interfaces
-ip link show
+# On macOS:
+ifconfig -l
+# or list all hardware network ports:
+networksetup -listallhardwareports
 
-# or use netstat
+# On Linux:
+ip link show
+# or use netstat:
 netstat -i
 ```
 
 ### No packets captured
 
 **Possible causes:**
-1. Interface is down — check with `ip link show`
-2. Interface filter is active — check `tcpdump -i eth0 -p`
-3. Promiscuous mode not supported — try a different interface
+1. Interface is down — check with `ip link show` (Linux) or `ifconfig <interface>` (macOS)
+2. Promiscuous mode not supported — try a different interface
+3. Interface is quiet — generate test traffic with `curl http://localhost:8000` or `ping 1.1.1.1`
 4. Running with insufficient privileges — use `sudo`
 
 ### Compile error: "pcap.h: No such file or directory"
@@ -1042,14 +1087,17 @@ netstat -i
 
 **Solution:**
 ```bash
+# macOS (Homebrew)
+brew install libpcap
+
 # Debian/Ubuntu
 sudo apt-get install libpcap-dev
 
-# macOS
-brew install libpcap
+# Fedora/RHEL
+sudo dnf install libpcap-devel
 
-# CentOS/RHEL
-sudo yum install libpcap-devel
+# Arch Linux
+sudo pacman -S libpcap
 ```
 
 ---

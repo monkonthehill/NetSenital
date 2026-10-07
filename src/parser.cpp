@@ -11,6 +11,18 @@
 #include <netinet/udp.h>
 #include <sys/types.h>
 
+#if defined(__APPLE__) || defined(__MACH__)
+#include <netinet/if_ether.h>
+#endif
+
+// Fallback EtherType definitions for systems where not provided by net/ethernet.h
+#ifndef ETHERTYPE_IP
+#define ETHERTYPE_IP 0x0800
+#endif
+#ifndef ETHERTYPE_IPV6
+#define ETHERTYPE_IPV6 0x86dd
+#endif
+
 #include "../include/packet.hpp"
 
 // NOTES: this pass adds IPv6. It needs new fields on PacketInfo (in
@@ -78,6 +90,42 @@ void parseEthernet(const u_char* packet, int caplen, PacketInfo& info)
             // unparsed, per this task's scope. info.etherType still
             // records what it was, even though we stop here.
             break;
+    }
+}
+
+// NOTES: macOS / BSD loopback interface (lo0) encapsulation handler.
+// Unlike Ethernet devices which use DLT_EN10MB (14-byte MAC header), BSD/macOS
+// loopback frames use DLT_NULL / DLT_LOOP link-layer encapsulation.
+// The packet begins with a 4-byte protocol family identifier in host or network byte order:
+//   AF_INET  (2)          -> IPv4
+//   AF_INET6 (24, 28, 30) -> IPv6
+// Immediately following those 4 bytes is the standard L3 IP packet.
+void parseNullLoopback(const u_char* packet, int caplen, PacketInfo& info)
+{
+    if (caplen < 4)
+    {
+        return;
+    }
+
+    uint32_t family = 0;
+    std::memcpy(&family, packet, sizeof(uint32_t));
+
+    // Loopback frames have no physical MAC addresses; zero them out cleanly
+    std::memset(info.srcMac, 0, sizeof(info.srcMac));
+    std::memset(info.dstMac, 0, sizeof(info.dstMac));
+
+    // Check AF_INET (2) in host endian and network endian
+    if (family == AF_INET || ntohl(family) == AF_INET || family == 2)
+    {
+        info.etherType = ETHERTYPE_IP;
+        parseIPv4(packet + 4, caplen - 4, info);
+    }
+    // BSD/macOS defines AF_INET6 as 30 (or 24/28 depending on BSD platform variant)
+    else if (family == AF_INET6 || ntohl(family) == AF_INET6 ||
+             family == 24 || family == 28 || family == 30)
+    {
+        info.etherType = ETHERTYPE_IPV6;
+        parseIPv6(packet + 4, caplen - 4, info);
     }
 }
 
@@ -214,8 +262,18 @@ void parseTCP(const u_char* packet, int caplen, PacketInfo& info)
 
     const struct tcphdr* tcph = reinterpret_cast<const struct tcphdr*>(packet);
     info.hasTransport         = true;
+
+    // NOTES: Field naming in <netinet/tcp.h>:
+    // BSD/macOS (Darwin) headers define `th_sport` and `th_dport`.
+    // Linux glibc defines both BSD names (`th_sport`, `th_dport`) and GNU aliases (`source`, `dest`).
+    // Using th_sport/th_dport on macOS (and fallback on Linux) guarantees seamless cross-platform compilation.
+#if defined(__APPLE__) || defined(__MACH__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    info.srcPort              = ntohs(tcph->th_sport);
+    info.dstPort              = ntohs(tcph->th_dport);
+#else
     info.srcPort              = ntohs(tcph->source);
     info.dstPort              = ntohs(tcph->dest);
+#endif
     // Byte 13 of the TCP header contains the standard flags (FIN, SYN, RST, PSH, ACK, URG)
     info.tcpFlags             = packet[13];
 }
@@ -230,8 +288,17 @@ void parseUDP(const u_char* packet, int caplen, PacketInfo& info)
     const struct udphdr* udph = reinterpret_cast<const struct udphdr*>(packet);
 
     info.hasTransport = true;
+
+    // NOTES: Field naming in <netinet/udp.h>:
+    // BSD/macOS (Darwin) headers define `uh_sport` and `uh_dport`.
+    // Linux glibc defines both BSD names (`uh_sport`, `uh_dport`) and GNU aliases (`source`, `dest`).
+#if defined(__APPLE__) || defined(__MACH__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    info.srcPort      = ntohs(udph->uh_sport);
+    info.dstPort      = ntohs(udph->uh_dport);
+#else
     info.srcPort      = ntohs(udph->source);
     info.dstPort      = ntohs(udph->dest);
+#endif
 }
 
 void parseICMP(const u_char* packet, int caplen, PacketInfo& info)

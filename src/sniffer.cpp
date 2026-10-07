@@ -179,6 +179,15 @@ void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const 
     last_ui_update = now;
 }
 
+// NOTES: Global datalink type configured from capture handle via pcap_datalink().
+// Defaults to DLT_EN10MB (Standard 10/100/1000 Ethernet). On macOS, capturing on lo0
+// yields DLT_NULL / DLT_LOOP, requiring 4-byte family header decoding.
+static int g_datalinkType = DLT_EN10MB;
+
+void setLinkLayerType(int linkType) {
+    g_datalinkType = linkType;
+}
+
 void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
     //*packet stores the adress of the first byte of contiguous block of bytes.
     // reinterpret_cast is preferred because it makes the conversion explicit.
@@ -197,7 +206,23 @@ void processPackets(u_char* arg, const struct pcap_pkthdr* pkthdr, const u_char*
     // and printPacketInfo() is the one deliberate place we look at the
     // result. `info` is fresh (all has* flags false) for every packet.
     PacketInfo info;
+
+    // Cross-platform DLT dispatch:
+    // On macOS / BSD systems, loopback (lo0) uses DLT_NULL / DLT_LOOP (4-byte family header)
+    // rather than DLT_EN10MB (14-byte Ethernet frame).
+#if defined(DLT_NULL)
+    if (g_datalinkType == DLT_NULL
+#if defined(DLT_LOOP)
+        || g_datalinkType == DLT_LOOP
+#endif
+    ) {
+        parseNullLoopback(packet, static_cast<int>(pkthdr->caplen), info);
+    } else {
+        parseEthernet(packet, static_cast<int>(pkthdr->caplen), info);
+    }
+#else
     parseEthernet(packet, static_cast<int>(pkthdr->caplen), info);
+#endif
 
     // NOTES: after parsing the packet into PacketInfo, we derive a FlowKey
     // (src/dst IP, ports, protocol) that uniquely identifies a network flow.

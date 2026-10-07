@@ -26,6 +26,10 @@ struct icmp_header
 // header plus how many bytes remain from there — that design didn't
 // change, only what happens with what it finds.
 void parseEthernet(const u_char* packet, int caplen, PacketInfo& info);
+// NOTES: macOS / BSD loopback interface (lo0) uses DLT_NULL / DLT_LOOP link-layer encapsulation
+// instead of 14-byte Ethernet (DLT_EN10MB). Packets start with a 4-byte protocol family
+// integer (AF_INET / AF_INET6) followed directly by the L3 IP packet.
+void parseNullLoopback(const u_char* packet, int caplen, PacketInfo& info);
 void parseIPv4(const u_char* packet, int caplen, PacketInfo& info);
 void parseIPv6(const u_char* packet, int caplen, PacketInfo& info);
 void parseTCP(const u_char* packet, int caplen, PacketInfo& info);

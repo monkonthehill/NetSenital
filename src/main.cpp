@@ -93,6 +93,10 @@ int main(int argc, char* argv[]) {
 
     int linkType = pcap_datalink(captureHandle);
 
+    // Configure sniffer link-layer decoder so macOS loopback (DLT_NULL / DLT_LOOP)
+    // vs standard Ethernet / Wi-Fi (DLT_EN10MB) is parsed accurately.
+    setLinkLayerType(linkType);
+
     std::cout << "Link-layer type: " << pcap_datalink_val_to_name(linkType) << "\n\n";
 
     // Clear terminal before the live dashboard starts.

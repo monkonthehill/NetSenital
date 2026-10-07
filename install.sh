@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# NetSentinel - Automated Installer for Linux
+# NetSentinel - Automated Installer for Linux & macOS
 # Repository: https://github.com/monkonthehill/NetSenital
 # ==============================================================================
 
@@ -13,12 +13,14 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}================================================================${NC}"
-echo -e "${BLUE}        NetSentinel NIDS - Linux Installation & Setup           ${NC}"
+echo -e "${BLUE}    NetSentinel NIDS - Linux & macOS Installation & Setup       ${NC}"
 echo -e "${BLUE}        Repository: https://github.com/monkonthehill/NetSenital  ${NC}"
 echo -e "${BLUE}================================================================${NC}"
 echo ""
 
-# 1. Check Root / Sudo
+# 1. Check Operating System and Root / Sudo
+OS="$(uname -s)"
+
 if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}[!] Warning: Not running as root. Sudo will be used for package installs.${NC}"
     SUDO="sudo"
@@ -28,7 +30,18 @@ fi
 
 # 2. Detect Package Manager and Install Dependencies
 echo -e "${GREEN}[1/5] Detecting package manager and installing core dependencies...${NC}"
-if command -v apt-get >/dev/null 2>&1; then
+if [ "$OS" = "Darwin" ]; then
+    echo -e "      Detected macOS (Darwin)"
+    if command -v brew >/dev/null 2>&1; then
+        echo -e "      Found Homebrew (brew) - installing libpcap & python3..."
+        brew install libpcap python3
+    elif command -v port >/dev/null 2>&1; then
+        echo -e "      Found MacPorts (port) - installing libpcap & python3..."
+        $SUDO port install libpcap python311
+    else
+        echo -e "${YELLOW}[!] Warning: Homebrew not detected. Please install Homebrew (https://brew.sh) or ensure Xcode tools & libpcap are installed.${NC}"
+    fi
+elif command -v apt-get >/dev/null 2>&1; then
     echo -e "      Detected Debian / Ubuntu (apt)"
     $SUDO apt-get update -qq
     $SUDO apt-get install -y -qq build-essential g++ make libpcap-dev python3 python3-pip python3-venv
@@ -59,7 +72,10 @@ make build
 
 # 5. Set Packet Capture Capabilities
 echo -e "${GREEN}[4/5] Configuring raw socket packet capture capabilities...${NC}"
-if command -v setcap >/dev/null 2>&1 && [ -f "./netsentinel" ]; then
+if [ "$OS" = "Darwin" ]; then
+    echo -e "      macOS detected: Packet capture uses BPF devices (/dev/bpf*)."
+    echo -e "      Note: NetSentinel should be run with sudo (or with /dev/bpf permissions)."
+elif command -v setcap >/dev/null 2>&1 && [ -f "./netsentinel" ]; then
     $SUDO setcap cap_net_raw=ep ./netsentinel 2>/dev/null || true
     echo -e "      CAP_NET_RAW capability applied to ./netsentinel"
 fi
@@ -76,5 +92,9 @@ echo -e "To start the Web Command & Control Dashboard:"
 echo -e "   ${YELLOW}./run.sh${NC}   or   ${YELLOW}make run${NC}"
 echo ""
 echo -e "To run standalone CLI capture:"
-echo -e "   ${YELLOW}sudo ./netsentinel <interface>${NC}  (e.g., sudo ./netsentinel eth0)"
+if [ "$OS" = "Darwin" ]; then
+    echo -e "   ${YELLOW}sudo ./netsentinel <interface>${NC}  (e.g., sudo ./netsentinel en0 or lo0)"
+else
+    echo -e "   ${YELLOW}sudo ./netsentinel <interface>${NC}  (e.g., sudo ./netsentinel eth0 or lo)"
+fi
 echo -e "${BLUE}================================================================${NC}"

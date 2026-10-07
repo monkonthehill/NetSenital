@@ -32,3 +32,7 @@ pcap_if_t* selectNodeByIndex(
 // caused the "freezes for several seconds on quiet traffic" issue. See the
 // full explanation in sniffer.cpp above this function's definition.
 void maybeRefreshDisplay(bool hasPacket, int counterValue, int packetLen, const PacketInfo* info);
+
+// NOTES: Configures the link-layer header type discovered via pcap_datalink()
+// (e.g., DLT_EN10MB for Ethernet/Wi-Fi or DLT_NULL / DLT_LOOP for macOS loopback).
+void setLinkLayerType(int linkType);

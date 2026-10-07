@@ -192,7 +192,32 @@ def get_interfaces() -> List[str]:
 
     found: List[str] = []
     try:
-        pcap = ctypes.CDLL("libpcap.so.1")
+        import ctypes.util
+
+        pcap_lib = ctypes.util.find_library("pcap")
+        # Multi-platform candidate search paths (macOS dylib, Homebrew prefix, Linux so)
+        candidates = [
+            pcap_lib,
+            "libpcap.dylib",
+            "/usr/lib/libpcap.dylib",
+            "/opt/homebrew/opt/libpcap/lib/libpcap.dylib",
+            "/usr/local/opt/libpcap/lib/libpcap.dylib",
+            "libpcap.so.1",
+            "libpcap.so",
+        ]
+        pcap = None
+        for candidate in candidates:
+            if candidate:
+                try:
+                    pcap = ctypes.CDLL(candidate)
+                    if pcap:
+                        break
+                except Exception:
+                    pass
+
+        if pcap is None:
+            raise OSError("Could not locate or load libpcap shared library")
+
         pcap.pcap_findalldevs.argtypes = [
             ctypes.POINTER(ctypes.POINTER(_PcapIf)),
             ctypes.c_char_p,
@@ -213,7 +238,8 @@ def get_interfaces() -> List[str]:
         print(f"[Net] libpcap enumeration failed: {exc}")
 
     if not found:
-        found = ["lo"]
+        # Default loopback interface: lo0 on macOS, lo on Linux
+        found = ["lo0" if sys.platform == "darwin" else "lo"]
 
     with _iface_lock:
         _iface_cache, _iface_cache_ts = found, now
@@ -401,12 +427,26 @@ def api_stats(request: Request):
 async def _ensure_binary_built() -> None:
     if os.path.exists(BIN_PATH):
         return
+
+    # Prefer invoking make build if Makefile exists to leverage platform-specific CXXFLAGS/LDFLAGS
+    if os.path.exists("Makefile"):
+        def _build_make():
+            return subprocess.run(["make", "build"], check=True, capture_output=True, text=True)
+
+        try:
+            await asyncio.to_thread(_build_make)
+            return
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
     cmd = [
         "g++",
         "-O2",
         "-Wall",
         "-Wextra",
         "-Wshadow",
+        "-std=c++17",
+        "-pthread",
         "src/main.cpp",
         "src/sniffer.cpp",
         "src/parser.cpp",
@@ -416,6 +456,15 @@ async def _ensure_binary_built() -> None:
         BIN_PATH,
         "-lpcap",
     ]
+
+    # On macOS, include Homebrew include/lib search directories if present
+    if sys.platform == "darwin":
+        for prefix in ["/opt/homebrew", "/usr/local"]:
+            inc = Path(prefix) / "opt/libpcap/include"
+            lib = Path(prefix) / "opt/libpcap/lib"
+            if inc.exists():
+                cmd.extend([f"-I{inc}", f"-L{lib}"])
+                break
 
     def _build():
         return subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -430,9 +479,16 @@ async def _ensure_binary_built() -> None:
 
 @app.post("/api/start")
 async def api_start(
-    request: Request, interface: str = "lo", model: str = "xgb", threshold: float = 0.6
+    request: Request,
+    interface: Optional[str] = None,
+    model: str = "xgb",
+    threshold: float = 0.6,
 ):
     _check_token(request)
+
+    # Dynamic default interface: lo0 on macOS, lo on Linux
+    if not interface:
+        interface = "lo0" if sys.platform == "darwin" else "lo"
 
     with state.lock:
         if state.proc is not None and state.proc.poll() is None:
@@ -472,11 +528,17 @@ async def api_start(
                 err = ""
             state.proc = None
             low = err.lower()
-            if "permission" in low or "cap_net_raw" in low:
-                state.last_error = (
-                    "Permission denied. Grant capabilities with "
-                    "'sudo setcap cap_net_raw=ep ./netsentinel' or run under sudo."
-                )
+            if "permission" in low or "cap_net_raw" in low or "bpf" in low:
+                if sys.platform == "darwin":
+                    state.last_error = (
+                        "Permission denied. On macOS, packet capture requires root privileges "
+                        "or access to /dev/bpf*. Please run with sudo: 'sudo python3 web_app.py'."
+                    )
+                else:
+                    state.last_error = (
+                        "Permission denied. Grant capabilities with "
+                        "'sudo setcap cap_net_raw=ep ./netsentinel' or run under sudo."
+                    )
             else:
                 state.last_error = err.strip() or "Process exited unexpectedly."
             return {"status": "error", "message": state.last_error}
@@ -1999,7 +2061,10 @@ def health():
 if __name__ == "__main__":
     if os.geteuid() != 0 and os.environ.get("NS_NO_SUDO") != "1":
         print("[NetSentinel] Elevating privileges with sudo for raw packet capture…")
-        print("[NetSentinel] Set NS_NO_SUDO=1 to skip this if you already ran setcap.")
+        if sys.platform == "darwin":
+            print("[NetSentinel] Set NS_NO_SUDO=1 to skip this if /dev/bpf permissions are configured.")
+        else:
+            print("[NetSentinel] Set NS_NO_SUDO=1 to skip this if you already ran setcap.")
         try:
             os.execvp("sudo", ["sudo", "-E", sys.executable] + sys.argv)
         except Exception as exc:  # noqa: BLE001
