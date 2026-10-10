@@ -22,6 +22,6 @@
   ],
   "n_features": 19,
   "target": "is_attack",
-  "rf_test_auc": 0.9999782428963055,
-  "xgb_test_auc": 0.9999782428963057
+  "rf_test_auc": 1.0,
+  "xgb_test_auc": 1.0
 }

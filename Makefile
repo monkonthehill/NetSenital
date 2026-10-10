@@ -120,6 +120,10 @@ cli: build
 	@echo "==> Launching NetSentinel CLI on interface: $(IFACE)..."
 	sudo ./$(TARGET) $(IFACE)
 
+dataset:
+	@echo "==> Generating lightweight multi-attack flow dataset..."
+	$(PYTHON) scripts/generate_dataset.py
+
 train:
 	@echo "==> Training Random Forest & XGBoost ML models..."
 	$(PYTHON) scripts/train_model.py
@@ -139,8 +143,9 @@ help:
 	@echo "  make install-deps - Install system and Python dependencies"
 	@echo "  make build        - Compile the C++ packet sniffer engine"
 	@echo "  make test         - Run AI-generated flow verification tests"
+	@echo "  make dataset      - Generate lightweight multi-attack dataset"
+	@echo "  make train        - Train/refresh ML threat detection models"
 	@echo "  make run          - Launch Web Control Dashboard (port 8000)"
 	@echo "  make cli [IFACE=] - Run CLI sniffer on specific interface"
-	@echo "  make train        - Train/refresh ML threat detection models"
 	@echo "  make clean        - Remove binaries and temporary files"
 	@echo "============================================================"

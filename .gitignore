@@ -20,5 +20,6 @@ ENV/
 *.swp
 *.swo
 *~
+*.bak
 .vscode/
 .idea/
