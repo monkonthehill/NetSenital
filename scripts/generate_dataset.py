@@ -314,16 +314,38 @@ def generate_benign_flows(n_samples: int, base_time: int) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 
 def generate_syn_floods(n_samples: int, base_time: int) -> pd.DataFrame:
-    """SYN Flood: Volumetric TCP SYN packet storm with 0 ACK and 0 responses."""
-    durations = np.random.uniform(0.001, 0.25, size=n_samples)
-    pkts = np.random.randint(25, 300, size=n_samples)
-    tot_b = pkts * np.random.randint(44, 60, size=n_samples)
+    """SYN Flood: Volumetric TCP SYN packet storms + high-rate embryonic connection floods."""
+    # 45% volumetric multi-packet floods, 55% rapid embryonic connection attempts (1-3 pkts per flow)
+    is_embryonic = np.random.choice([False, True], size=n_samples, p=[0.45, 0.55])
+
+    durations = np.where(
+        is_embryonic,
+        np.random.uniform(0.0001, 0.04, size=n_samples),
+        np.random.uniform(0.01, 0.25, size=n_samples)
+    )
+    fwd_pkts = np.where(
+        is_embryonic,
+        np.random.choice([1, 2, 3], size=n_samples, p=[0.75, 0.18, 0.07]),
+        np.random.randint(25, 300, size=n_samples)
+    )
+    # Embryonic packets on loopback/closed ports receive kernel RST,ACK (1 bwd packet)
+    has_kernel_rst = is_embryonic & np.random.choice([True, False], size=n_samples, p=[0.75, 0.25])
+    bwd_pkts = np.where(has_kernel_rst, 1, 0)
+    pkts = fwd_pkts + bwd_pkts
+
+    fwd_b = fwd_pkts * np.random.randint(44, 74, size=n_samples)
+    bwd_b = bwd_pkts * np.random.randint(40, 54, size=n_samples)
+    tot_b = fwd_b + bwd_b
     d_floor = np.maximum(durations, 0.001)
 
     src_ips = random_ipv4_pool(ATTACKER_SUBNETS, n_samples)
     dst_ips = random_ipv4_pool(INTERNAL_SERVER_SUBNETS, n_samples)
     src_ports = random_ephemeral_ports(n_samples)
-    dst_ports = np.random.choice([80, 443, 8080, 22, 3306], size=n_samples)
+    dst_ports = np.random.choice([80, 443, 8080, 8999, 9999, 8888, 22, 3306], size=n_samples)
+
+    syn_cnt = fwd_pkts
+    ack_cnt = np.where(has_kernel_rst, 1, 0)
+    rst_cnt = np.where(has_kernel_rst, 1, 0)
 
     return pd.DataFrame({
         "startTimeUnixMs": base_time + np.random.randint(0, 40000000, size=n_samples),
@@ -334,10 +356,10 @@ def generate_syn_floods(n_samples: int, base_time: int) -> pd.DataFrame:
         "packetsPerSecond": np.round(pkts / d_floor, 4),
         "bytesPerSecond": np.round(tot_b / d_floor, 4),
         "averagePacketSize": np.round(tot_b / pkts, 4),
-        "synCount": pkts, "ackCount": 0, "finCount": 0,
-        "rstCount": 0, "pshCount": 0, "urgCount": 0,
-        "fwd_packets": pkts, "fwd_bytes": tot_b,
-        "bwd_packets": 0, "bwd_bytes": 0,
+        "synCount": syn_cnt, "ackCount": ack_cnt, "finCount": 0,
+        "rstCount": rst_cnt, "pshCount": 0, "urgCount": 0,
+        "fwd_packets": fwd_pkts, "fwd_bytes": fwd_b,
+        "bwd_packets": bwd_pkts, "bwd_bytes": bwd_b,
         "label": "syn_flood"
     })
 
@@ -444,14 +466,14 @@ def generate_udp_floods(n_samples: int, base_time: int) -> pd.DataFrame:
     })
 
 def generate_slowloris(n_samples: int, base_time: int) -> pd.DataFrame:
-    """Slowloris: Extended connection holding with minimal packet rate (< 0.5 PPS)."""
-    durations = np.random.uniform(20.0, 90.0, size=n_samples)
-    pkts = (durations * np.random.uniform(0.15, 0.4, size=n_samples)).astype(int).clip(min=5)
+    """Slowloris: Extended connection holding with minimal packet rate (< 1.5 PPS) and low payload volume."""
+    durations = np.random.uniform(5.0, 90.0, size=n_samples)
+    pkts = (durations * np.random.uniform(0.15, 0.5, size=n_samples)).astype(int).clip(min=4)
     fwd_pkts = pkts
-    bwd_pkts = np.random.choice([0, 1], size=n_samples, p=[0.85, 0.15])
+    bwd_pkts = np.random.choice([0, 1, 2], size=n_samples, p=[0.75, 0.20, 0.05])
     tot_pkts = fwd_pkts + bwd_pkts
 
-    fwd_b = fwd_pkts * np.random.randint(65, 95, size=n_samples)
+    fwd_b = fwd_pkts * np.random.randint(45, 80, size=n_samples)
     bwd_b = bwd_pkts * 54
     tot_b = fwd_b + bwd_b
     d_floor = np.maximum(durations, 0.001)
@@ -459,7 +481,10 @@ def generate_slowloris(n_samples: int, base_time: int) -> pd.DataFrame:
     src_ips = random_ipv4_pool(ATTACKER_SUBNETS, n_samples)
     dst_ips = random_ipv4_pool(INTERNAL_SERVER_SUBNETS, n_samples)
     src_ports = random_ephemeral_ports(n_samples)
-    dst_ports = np.random.choice([80, 443, 8080], size=n_samples, p=[0.7, 0.2, 0.1])
+    dst_ports = np.random.choice([80, 443, 8080, 8888, 8889, 8000], size=n_samples, p=[0.45, 0.15, 0.15, 0.15, 0.05, 0.05])
+
+    rsts = np.random.choice([0, 1], size=n_samples, p=[0.75, 0.25])
+    fins = np.random.choice([0, 1], size=n_samples, p=[0.70, 0.30])
 
     return pd.DataFrame({
         "startTimeUnixMs": base_time + np.random.randint(0, 40000000, size=n_samples),
@@ -470,8 +495,8 @@ def generate_slowloris(n_samples: int, base_time: int) -> pd.DataFrame:
         "packetsPerSecond": np.round(tot_pkts / d_floor, 4),
         "bytesPerSecond": np.round(tot_b / d_floor, 4),
         "averagePacketSize": np.round(tot_b / tot_pkts, 4),
-        "synCount": 1, "ackCount": np.maximum(tot_pkts - 1, 0), "finCount": 0,
-        "rstCount": 0, "pshCount": (fwd_pkts * 0.6).astype(int), "urgCount": 0,
+        "synCount": 1, "ackCount": np.maximum(tot_pkts - 1, 0), "finCount": fins,
+        "rstCount": rsts, "pshCount": (fwd_pkts * 0.4).astype(int), "urgCount": 0,
         "fwd_packets": fwd_pkts, "fwd_bytes": fwd_b,
         "bwd_packets": bwd_pkts, "bwd_bytes": bwd_b,
         "label": "slowloris"
@@ -479,8 +504,8 @@ def generate_slowloris(n_samples: int, base_time: int) -> pd.DataFrame:
 
 def generate_slow_post(n_samples: int, base_time: int) -> pd.DataFrame:
     """Slow POST (RUDY): Slow HTTP POST holding server threads open with periodic 1-byte chunks."""
-    durations = np.random.uniform(15.0, 75.0, size=n_samples)
-    fwd_pkts = (durations * np.random.uniform(0.2, 0.5, size=n_samples)).astype(int).clip(min=6)
+    durations = np.random.uniform(5.0, 75.0, size=n_samples)
+    fwd_pkts = (durations * np.random.uniform(0.2, 0.5, size=n_samples)).astype(int).clip(min=5)
     bwd_pkts = (fwd_pkts * 0.3).astype(int).clip(min=1)
     tot_pkts = fwd_pkts + bwd_pkts
 
@@ -492,7 +517,9 @@ def generate_slow_post(n_samples: int, base_time: int) -> pd.DataFrame:
     src_ips = random_ipv4_pool(ATTACKER_SUBNETS, n_samples)
     dst_ips = random_ipv4_pool(INTERNAL_SERVER_SUBNETS, n_samples)
     src_ports = random_ephemeral_ports(n_samples)
-    dst_ports = np.random.choice([80, 443, 8080], size=n_samples)
+    dst_ports = np.random.choice([80, 443, 8080, 8889, 8888], size=n_samples)
+
+    rsts = np.random.choice([0, 1], size=n_samples, p=[0.75, 0.25])
 
     return pd.DataFrame({
         "startTimeUnixMs": base_time + np.random.randint(0, 40000000, size=n_samples),
@@ -504,28 +531,28 @@ def generate_slow_post(n_samples: int, base_time: int) -> pd.DataFrame:
         "bytesPerSecond": np.round(tot_b / d_floor, 4),
         "averagePacketSize": np.round(tot_b / tot_pkts, 4),
         "synCount": 1, "ackCount": np.maximum(tot_pkts - 1, 0), "finCount": 0,
-        "rstCount": 0, "pshCount": (fwd_pkts * 0.5).astype(int), "urgCount": 0,
+        "rstCount": rsts, "pshCount": (fwd_pkts * 0.5).astype(int), "urgCount": 0,
         "fwd_packets": fwd_pkts, "fwd_bytes": fwd_b,
         "bwd_packets": bwd_pkts, "bwd_bytes": bwd_b,
         "label": "slow_post"
     })
 
 def generate_brute_force(n_samples: int, base_time: int) -> pd.DataFrame:
-    """Brute Force: Rapid authentication trial bursts with frequent TCP resets."""
-    durations = np.random.uniform(0.08, 1.2, size=n_samples)
+    """Brute Force: Rapid authentication trial bursts with bidirectional payloads and TCP resets."""
+    durations = np.random.uniform(0.12, 2.5, size=n_samples)
     fwd_pkts = np.random.randint(6, 25, size=n_samples)
-    bwd_pkts = (fwd_pkts * np.random.uniform(0.7, 1.1, size=n_samples)).astype(int).clip(min=4)
+    bwd_pkts = (fwd_pkts * np.random.uniform(0.7, 1.2, size=n_samples)).astype(int).clip(min=4)
     tot_pkts = fwd_pkts + bwd_pkts
 
-    fwd_b = fwd_pkts * np.random.randint(85, 200, size=n_samples)
-    bwd_b = bwd_pkts * np.random.randint(70, 160, size=n_samples)
+    fwd_b = fwd_pkts * np.random.randint(140, 320, size=n_samples)
+    bwd_b = bwd_pkts * np.random.randint(110, 260, size=n_samples)
     tot_b = fwd_b + bwd_b
     d_floor = np.maximum(durations, 0.001)
 
     src_ips = random_ipv4_pool(ATTACKER_SUBNETS, n_samples)
     dst_ips = random_ipv4_pool(INTERNAL_SERVER_SUBNETS, n_samples)
     src_ports = random_ephemeral_ports(n_samples)
-    dst_ports = np.random.choice([22, 80, 443, 21, 3389], size=n_samples, p=[0.45, 0.25, 0.15, 0.10, 0.05])
+    dst_ports = np.random.choice([22, 80, 443, 8080, 9999, 21, 3389], size=n_samples, p=[0.35, 0.20, 0.15, 0.10, 0.10, 0.05, 0.05])
 
     rsts = np.random.choice([1, 2], size=n_samples, p=[0.7, 0.3])
 

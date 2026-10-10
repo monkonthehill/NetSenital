@@ -73,7 +73,12 @@ Network security operations need to detect malicious behavior and volumetric ano
   - Smooth animated charts (Throughput/PPS line chart, protocol distribution doughnut, TCP flag bar chart, threat timeline scatter).
   - Zero-allocation DOM table row pooling for silky 60 FPS rendering.
   - Automatic `sudo` privilege elevation on launch.
-- **Automated Verification**: AI-generated flow test suite with 100% pass rate (7/7 tests).
+- **Active Network Mitigation (IPS Auto-Block & Automated Cooldown)**:
+  - Automated firewall drop rules for high-confidence threats (&ge; 98% certainty).
+  - Automatic unblock cooldown timers (30s, 60s, 120s, 300s) running asynchronously in the background.
+  - Loopback & management whitelist protection (`127.0.0.1`, `::1`) preventing dashboard self-lockout during testing.
+  - Interactive dashboard panel showing live remaining seconds countdown and manual 1-click unblock override.
+- **Automated Verification**: AI-generated flow test suite with 100% pass rate (7/7 C++ tests, 5/5 ML pipeline tests, 5/5 firewall mitigation tests).
 
 ---
 
@@ -152,6 +157,20 @@ Test NetSentinel's real-time detection and exact attack categorization by simula
 | **Full Tour** | `make simulate-all` | `python3 scripts/simulate_attack.py --attack all` | Sequential demonstration tour of all attack families |
 
 > **Monitoring Tip:** With the web dashboard running (`make run`), select the **Loopback (`lo` / `lo0`)** interface in the top-left dropdown, click **Start Sniffing**, and run any simulation in a separate terminal. The flow table will classify the traffic with high threat probability and display the exact category badge (e.g. `[BRUTE FORCE]`, `[SYN FLOOD]`, `[SLOWLORIS]`).
+
+### 🛡️ Active Network Mitigation (IPS Auto-Block & Automated Cooldown)
+
+NetSentinel features an integrated **Intrusion Prevention Engine (IPS)** that mitigates malicious traffic in real time:
+
+- **Automated High-Certainty Blocking**: When any network flow achieves a threat certainty score &ge; 98% (or user-tuned threshold), NetSentinel automatically enrolls the offending source IP into the mitigation blocklist.
+- **Automated Cooldown & Recovery**: Blocked IP addresses are held for a user-selectable cooldown duration (**30s, 60s, 120s, or 300s**). An asynchronous scheduler periodically reaps expired blocks, automatically restoring traffic once the cooldown expires.
+- **Self-Lockout Whitelist Protection**: Loopback and management addresses (`127.0.0.1`, `::1`, `localhost`, `0.0.0.0`) are whitelisted from raw OS-level lockout so local testing never severs your browser connection to the Command Dashboard (`localhost:8000`). Meanwhile, external attacker IPs receive genuine OS firewall drops (`iptables -I INPUT -s <IP> -j DROP` on Linux).
+- **Manual Dashboard Override**: Operators can toggle Auto-Block ON/OFF, adjust cooldown timers on the fly, or click **`UNBLOCK`** on any blocked actor directly in the Web Dashboard.
+- **REST Control Endpoints**:
+  - `GET /api/mitigation` &mdash; Returns live blocked actor table with real-time remaining seconds.
+  - `POST /api/mitigation/config` &mdash; Update runtime configuration (`enabled`, `cooldown_sec`, `threshold`).
+  - `POST /api/mitigation/unblock` &mdash; Immediately release a blocked IP (`{"ip": "1.2.3.4"}`).
+  - `POST /api/mitigation/block` &mdash; Manually quarantine an IP (`{"ip": "1.2.3.4", "reason": "Manual"}`).
 
 ---
 

@@ -52,6 +52,9 @@ $(TARGET): $(SRCS)
 test: $(TEST_BIN)
 	@echo "==> Running NetSentinel test suite..."
 	./$(TEST_BIN)
+	@echo "==> Running ML Pipeline and Firewall Mitigation tests..."
+	$(PYTHON) scripts/test_ml_pipeline.py
+	$(PYTHON) scripts/test_mitigation.py
 
 $(TEST_BIN): $(TEST_SRC)
 	@echo "==> Compiling test suite..."
