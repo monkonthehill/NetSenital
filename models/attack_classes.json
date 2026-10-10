@@ -1,0 +1,11 @@
+{
+    "0": "Benign",
+    "1": "SYN Flood",
+    "2": "Port Scan",
+    "3": "Stealth Scan",
+    "4": "UDP Flood",
+    "5": "Slowloris",
+    "6": "Slow POST",
+    "7": "Brute Force",
+    "8": "ICMP Flood"
+}

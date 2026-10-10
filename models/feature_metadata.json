@@ -45,9 +45,21 @@
     "test_accuracy": 1.0,
     "test_f1": 1.0,
     "test_roc_auc": 1.0,
+    "category_accuracy": 0.99984,
     "cv_mean_accuracy": 0.9999946666666666,
     "classes": [
         "benign",
         "attack"
-    ]
+    ],
+    "attack_categories": {
+        "0": "Benign",
+        "1": "SYN Flood",
+        "2": "Port Scan",
+        "3": "Stealth Scan",
+        "4": "UDP Flood",
+        "5": "Slowloris",
+        "6": "Slow POST",
+        "7": "Brute Force",
+        "8": "ICMP Flood"
+    }
 }

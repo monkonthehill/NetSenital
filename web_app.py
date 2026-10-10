@@ -139,13 +139,49 @@ state = _State()
 # ═══════════════════════════════════════════════════════════════════════
 MODEL: object = None
 BOOSTER: object = None
+CATEGORY_BOOSTER: object = None
+ATTACK_CLASSES: dict[int, str] = {
+    0: "Benign",
+    1: "SYN Flood",
+    2: "Port Scan",
+    3: "Stealth Scan",
+    4: "UDP Flood",
+    5: "Slowloris",
+    6: "Slow POST",
+    7: "Brute Force",
+    8: "ICMP Flood",
+}
 
 
 def load_ml_model(model_type: str) -> None:
     """Load (or reload) the ML model. Never raises — logs and falls back to mock."""
-    global MODEL, BOOSTER
+    global MODEL, BOOSTER, CATEGORY_BOOSTER, ATTACK_CLASSES
     state.model_type = model_type
     MODEL = BOOSTER = None
+
+    # Load attack class mapping if available
+    cat_json = MODELS_DIR / "attack_classes.json"
+    if cat_json.exists():
+        try:
+            import json
+            with open(cat_json) as f:
+                raw_map = json.load(f)
+                ATTACK_CLASSES = {int(k): str(v) for k, v in raw_map.items()}
+        except Exception:
+            pass
+
+    # Load multiclass attack category classifier
+    cat_path = MODELS_DIR / "category_model.json"
+    if cat_path.exists() and xgb is not None:
+        try:
+            cm = xgb.XGBClassifier()
+            cm.load_model(str(cat_path))
+            cm.get_booster().inplace_predict(np.zeros((1, 19), dtype=np.float32))
+            CATEGORY_BOOSTER = cm.get_booster()
+            print(f"[ML] Attack Category Classifier loaded from {cat_path}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ML] Category model load warning: {exc}")
+            CATEGORY_BOOSTER = None
 
     try:
         if model_type == "xgb":
@@ -320,6 +356,36 @@ class FlowTailer:
         return lines
 
 
+def heuristic_attack_category(f: dict) -> str:
+    """Fallback heuristic classifier if ML category booster is unavailable."""
+    proto = f.get("protocol", 6)
+    d_port = f.get("dstPort", 0)
+    dur = f.get("duration", 0.0)
+    pps = f.get("packetsPerSecond", 0.0)
+    syn = f.get("synCount", 0)
+    ack = f.get("ackCount", 0)
+    fin = f.get("finCount", 0)
+    rst = f.get("rstCount", 0)
+    pkts = f.get("packets", 0)
+    bwd_pkts = f.get("bwd_packets", 0)
+
+    if proto == 1:
+        return "ICMP Flood"
+    if proto == 17:
+        return "UDP Flood"
+    if rst >= 1 or d_port in (22, 21, 3389) or (d_port in (80, 443, 8080) and rst > 0):
+        return "Brute Force"
+    if syn >= 3 and ack == 0 and bwd_pkts == 0:
+        return "SYN Flood"
+    if fin > 0 and ack == 0:
+        return "Stealth Scan"
+    if pkts <= 2 and bwd_pkts <= 1:
+        return "Port Scan"
+    if dur > 10.0 and pps < 1.0:
+        return "Slowloris"
+    return "Attack"
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  Parsing + scoring (runs in a worker thread)
 # ═══════════════════════════════════════════════════════════════════════
@@ -386,12 +452,30 @@ def _parse_and_score(lines: List[str], threshold: float) -> Tuple[List[dict], in
     else:
         scores = np.zeros(len(parsed), dtype=np.float32)
 
+    cat_probs = None
+    if CATEGORY_BOOSTER is not None:
+        try:
+            cat_probs = CATEGORY_BOOSTER.inplace_predict(X)
+        except Exception:
+            cat_probs = None
+
     attacks = 0
     for i, f in enumerate(parsed):
         s = float(scores[i])
         f["threat_score"] = s
         f["is_anomaly"] = s >= threshold
-        attacks += int(f["is_anomaly"])
+        if f["is_anomaly"]:
+            attacks += 1
+            if cat_probs is not None:
+                cid = int(np.argmax(cat_probs[i]))
+                if cid == 0:
+                    cid = int(np.argmax(cat_probs[i, 1:])) + 1
+                f["attack_type"] = ATTACK_CLASSES.get(cid, "Attack")
+            else:
+                f["attack_type"] = heuristic_attack_category(f)
+        else:
+            f["attack_type"] = "Benign"
+
     return parsed, attacks
 
 
@@ -1806,9 +1890,10 @@ function addAlert(f){
   const item = document.createElement('div');
   item.className = 'alert ' + sev;
 
+  const atkName = (f.attack_type && f.attack_type !== 'Benign') ? f.attack_type.toUpperCase() : 'ATTACK';
   const head = document.createElement('div'); head.className = 'a-head';
   const strong = document.createElement('strong');
-  strong.textContent = `${target} · ${f.srcIp} → ${f.dstIp}`;
+  strong.textContent = `${atkName} · ${target} · ${f.srcIp} → ${f.dstIp}`;
   const sevB = document.createElement('span');
   sevB.className = 'sev ' + sev; sevB.textContent = sev.toUpperCase();
   head.append(strong, sevB);
@@ -1964,8 +2049,13 @@ function renderTable(){
 
     c[8].textContent = '';
     const bd = document.createElement('span');
-    bd.className = f.is_anomaly ? 'badge atk' : 'badge ben';
-    bd.textContent = f.is_anomaly ? 'ATTACK' : 'BENIGN';
+    if (f.is_anomaly) {
+      bd.className = 'badge atk';
+      bd.textContent = (f.attack_type && f.attack_type !== 'Benign') ? f.attack_type.toUpperCase() : 'ATTACK';
+    } else {
+      bd.className = 'badge ben';
+      bd.textContent = 'BENIGN';
+    }
     c[8].appendChild(bd);
   }
   for (let i = n; i < TABLE_POOL; i++) pool[i].style.display = 'none';
@@ -2002,7 +2092,7 @@ $('exportBtn').onclick = () => {
                 'duration','packets','bytes','packetsPerSecond','bytesPerSecond',
                 'averagePacketSize','synCount','ackCount','finCount','rstCount',
                 'pshCount','urgCount','fwd_packets','fwd_bytes','bwd_packets','bwd_bytes',
-                'threat_score','is_anomaly'];
+                'threat_score','is_anomaly','attack_type'];
   const csv = [cols.join(',')].concat(
     flowList.map(r => cols.map(c => {
       const v = r[c];

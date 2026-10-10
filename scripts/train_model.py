@@ -203,6 +203,62 @@ def train_and_evaluate():
     print("=" * 65)
 
     # -------------------------------------------------------------------------
+    # 3. Train Attack Category Classifier (Multiclass 9-Family Model)
+    # -------------------------------------------------------------------------
+    print("\n--- Training Attack Category Classifier (Multiclass 9-Family Model) ---")
+    t_cat = time.time()
+    
+    label_mapping = {
+        "benign": 0,
+        "syn_flood": 1,
+        "port_scan": 2,
+        "stealth_scan": 3,
+        "udp_flood": 4,
+        "slowloris": 5,
+        "slow_post": 6,
+        "brute_force": 7,
+        "icmp_flood": 8
+    }
+    display_names = {
+        "0": "Benign",
+        "1": "SYN Flood",
+        "2": "Port Scan",
+        "3": "Stealth Scan",
+        "4": "UDP Flood",
+        "5": "Slowloris",
+        "6": "Slow POST",
+        "7": "Brute Force",
+        "8": "ICMP Flood"
+    }
+
+    y_multi_train = labels_train.map(label_mapping).values
+    y_multi_test = labels_test.map(label_mapping).values
+
+    cat_model = xgb.XGBClassifier(
+        n_estimators=100,
+        max_depth=8,
+        learning_rate=0.1,
+        objective="multi:softprob",
+        num_class=9,
+        tree_method="hist",
+        n_jobs=-1,
+        random_state=42,
+        eval_metric="mlogloss"
+    )
+    cat_model.fit(X_train, y_multi_train)
+    cat_elapsed = time.time() - t_cat
+    print(f"[+] Attack Category Classifier trained in {cat_elapsed:.2f}s.")
+
+    cat_preds = cat_model.predict(X_test)
+    class_names = [display_names[str(i)] for i in range(9)]
+    print("\nAttack Category Classification Report (Holdout Test Set):")
+    print(classification_report(y_multi_test, cat_preds, target_names=class_names, digits=4))
+
+    cat_model.save_model("models/category_model.json")
+    with open("models/attack_classes.json", "w") as f:
+        json.dump(display_names, f, indent=4)
+
+    # -------------------------------------------------------------------------
     # Save Model Artifacts & Feature Rankings
     # -------------------------------------------------------------------------
     joblib.dump(rf, "models/rf_model.joblib")
@@ -221,16 +277,20 @@ def train_and_evaluate():
         "test_accuracy": float(accuracy_score(y_test, xgb_preds)),
         "test_f1": float(f1_score(y_test, xgb_preds)),
         "test_roc_auc": float(roc_auc_score(y_test, xgb_probs)),
+        "category_accuracy": float(accuracy_score(y_multi_test, cat_preds)),
         "cv_mean_accuracy": float(np.mean(cv_accs)),
-        "classes": ["benign", "attack"]
+        "classes": ["benign", "attack"],
+        "attack_categories": display_names
     }
 
     with open("models/feature_metadata.json", "w") as f:
         json.dump(metadata, f, indent=4)
 
     print("\n[+] Model artifacts saved successfully:")
-    print(" - models/rf_model.joblib")
-    print(" - models/xgb_model.json")
+    print(" - models/rf_model.joblib (Binary Random Forest)")
+    print(" - models/xgb_model.json (Binary XGBoost Threat Engine)")
+    print(" - models/category_model.json (Multiclass Category Classifier)")
+    print(" - models/attack_classes.json (Category Name Mappings)")
     print(" - models/feature_metadata.json")
 
 if __name__ == "__main__":

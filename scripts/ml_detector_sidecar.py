@@ -35,6 +35,34 @@ class AnomalyDetector:
     def __init__(self, model_type="xgb", threshold=0.6):
         self.model_type = model_type
         self.threshold = threshold
+        self.category_model = None
+        self.attack_classes = {
+            0: "Benign",
+            1: "SYN Flood",
+            2: "Port Scan",
+            3: "Stealth Scan",
+            4: "UDP Flood",
+            5: "Slowloris",
+            6: "Slow POST",
+            7: "Brute Force",
+            8: "ICMP Flood",
+        }
+
+        if os.path.exists("models/attack_classes.json"):
+            try:
+                with open("models/attack_classes.json") as f:
+                    raw_classes = json.load(f)
+                    self.attack_classes = {int(k): str(v) for k, v in raw_classes.items()}
+            except Exception:
+                pass
+
+        cat_path = "models/category_model.json"
+        if os.path.exists(cat_path):
+            try:
+                self.category_model = xgb.XGBClassifier()
+                self.category_model.load_model(cat_path)
+            except Exception as e:
+                print(f"[Detector] Warning loading category model: {e}")
 
         if model_type == "xgb":
             model_path = "models/xgb_model.json"
@@ -63,7 +91,19 @@ class AnomalyDetector:
             prob = float(self.model.predict_proba(X)[0][1])
 
         is_anomaly = prob >= self.threshold
-        return is_anomaly, prob
+        attack_type = "Benign"
+
+        if is_anomaly:
+            if self.category_model is not None:
+                cat_probs = self.category_model.predict_proba(X)[0]
+                cid = int(np.argmax(cat_probs))
+                if cid == 0:
+                    cid = int(np.argmax(cat_probs[1:])) + 1
+                attack_type = self.attack_classes.get(cid, "Attack")
+            else:
+                attack_type = "Attack"
+
+        return is_anomaly, prob, attack_type
 
 def run_zmq_listener(detector, endpoint="ipc:///tmp/netsentinel_flows.ipc"):
     if not HAS_ZMQ:
@@ -80,16 +120,16 @@ def run_zmq_listener(detector, endpoint="ipc:///tmp/netsentinel_flows.ipc"):
         while True:
             msg = subscriber.recv_string()
             data = json.loads(msg)
-            is_anomaly, prob = detector.predict(data)
+            is_anomaly, prob, attack_type = detector.predict(data)
             
             src = f"{data.get('srcIp', '?')}:{data.get('srcPort', 0)}"
             dst = f"{data.get('dstIp', '?')}:{data.get('dstPort', 0)}"
             proto = data.get('protocol', 6)
 
             if is_anomaly:
-                print(f"\033[1;31m[ALERT] ANOMALY DETECTED!\033[0m {src} -> {dst} (Proto: {proto}) | Score: {prob*100:.1f}%")
+                print(f"\033[1;31m[ALERT] {attack_type.upper()} DETECTED!\033[0m {src} -> {dst} (Proto: {proto}) | Threat Score: {prob*100:.1f}%")
             else:
-                print(f"[BENIGN] {src} -> {dst} | Score: {prob*100:.1f}%")
+                print(f"[BENIGN] {src} -> {dst} | Threat Score: {prob*100:.1f}%")
     except KeyboardInterrupt:
         print("\n[Detector] Stopped.")
     finally:
@@ -151,13 +191,13 @@ def run_file_watcher(detector, csv_path="Data/packet_data.csv", poll_interval=1.
                         data["bwd_packets"] = 0
                         data["bwd_bytes"] = 0
 
-                    is_anomaly, prob = detector.predict(data)
+                    is_anomaly, prob, attack_type = detector.predict(data)
                     src = f"{data['srcIp']}:{int(data['srcPort'])}"
                     dst = f"{data['dstIp']}:{int(data['dstPort'])}"
                     proto = int(data['protocol'])
 
                     if is_anomaly:
-                        print(f"\033[1;31m[ALERT] ATTACK DETECTED!\033[0m {src} -> {dst} (Proto: {proto}) | Threat Score: {prob*100:.1f}%")
+                        print(f"\033[1;31m[ALERT] {attack_type.upper()} DETECTED!\033[0m {src} -> {dst} (Proto: {proto}) | Threat Score: {prob*100:.1f}%")
                     else:
                         print(f"[INFO ] Normal flow: {src} -> {dst} | Threat Score: {prob*100:.1f}%")
                 except Exception as e:
