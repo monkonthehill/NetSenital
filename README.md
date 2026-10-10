@@ -120,20 +120,38 @@ sudo ./netsentinel lo0
 make cli IFACE=lo0
 ```
 
-### 🧠 Dataset Generation & Model Retraining
+### 🧠 Enterprise Dataset Generation & Model Retraining
 
-Generate a statistically realistic 22,000-flow dataset covering benign traffic and 5 distinct attack classes (Port Scan, SYN Flood, UDP Flood, Slowloris, Brute Force) in under 1 second without consuming excessive system resources:
+Generate an enterprise-grade 250,000-flow dataset covering 10 benign application profiles and 8 distinct attack families in ~5 seconds using multi-threaded vectorized NumPy generation:
 
 ```bash
-# Generate lightweight high-entropy flow dataset (22,000 flows in ~0.7s, <50MB RAM)
+# Generate enterprise multi-attack flow dataset (250,000 flows in ~5s, scalable via --total-flows)
 make dataset
 
-# Retrain Random Forest and XGBoost models
+# Retrain Random Forest, XGBoost binary threat scorer, and Multiclass Category classifier
 make train
 
-# Run ML verification tests
+# Run ML pipeline verification tests (asserting 100% scenario accuracy)
 python3 scripts/test_ml_pipeline.py
 ```
+
+### 🎯 Live Attack Simulation & Real-Time Monitoring
+
+Test NetSentinel's real-time detection and exact attack categorization by simulating non-destructive synthetic attack patterns on local loopback (`127.0.0.1`). Watch alerts and category badges update dynamically in the **Cyber Command Dashboard** (`http://localhost:8000`):
+
+| Attack Category | Makefile Target | Standalone Python Script | Attack Signature Simulated |
+| :--- | :--- | :--- | :--- |
+| **Brute Force** | `make simulate-bruteforce` | `python3 scripts/simulate_bruteforce.py` | Rapid HTTP auth requests with TCP resets (`SO_LINGER RST`) |
+| **SYN Flood** | `make simulate-synflood` | `python3 scripts/simulate_synflood.py` | Volumetric embryonic TCP SYN packets with 0 ACK |
+| **Port Scan** | `make simulate-portscan` | `python3 scripts/simulate_portscan.py` | Sequential TCP port sweep across consecutive ports |
+| **UDP Flood** | `make simulate-udpflood` | `python3 scripts/simulate_udpflood.py` | High-throughput UDP datagram storm to unassigned ports |
+| **Slowloris** | `make simulate-slowloris` | `python3 scripts/simulate_slowloris.py` | Low-and-slow HTTP partial GET header socket holding |
+| **Slow POST** | `make simulate-slowpost` | `python3 scripts/simulate_slowpost.py` | Fragmented HTTP POST body dripping (RUDY) |
+| **ICMP Flood** | `make simulate-icmp` | `python3 scripts/simulate_icmp.py` | Sub-second ICMP Echo Request burst |
+| **Stealth Scan** | `make simulate-stealthscan` | `python3 scripts/simulate_stealthscan.py` | Abnormal TCP flags / half-close FIN probes |
+| **Full Tour** | `make simulate-all` | `python3 scripts/simulate_attack.py --attack all` | Sequential demonstration tour of all attack families |
+
+> **Monitoring Tip:** With the web dashboard running (`make run`), select the **Loopback (`lo` / `lo0`)** interface in the top-left dropdown, click **Start Sniffing**, and run any simulation in a separate terminal. The flow table will classify the traffic with high threat probability and display the exact category badge (e.g. `[BRUTE FORCE]`, `[SYN FLOOD]`, `[SLOWLORIS]`).
 
 ---
 

@@ -130,7 +130,39 @@ train:
 
 simulate-bruteforce:
 	@echo "==> Simulating Brute Force attack traffic on local interface..."
-	$(PYTHON) scripts/simulate_attack.py --attack brute_force --count 100 --delay 0.05
+	$(PYTHON) scripts/simulate_bruteforce.py
+
+simulate-synflood:
+	@echo "==> Simulating SYN Flood attack traffic on local interface..."
+	$(PYTHON) scripts/simulate_synflood.py
+
+simulate-portscan:
+	@echo "==> Simulating Port Scan sweep traffic on local interface..."
+	$(PYTHON) scripts/simulate_portscan.py
+
+simulate-udpflood:
+	@echo "==> Simulating UDP Flood datagram blast on local interface..."
+	$(PYTHON) scripts/simulate_udpflood.py
+
+simulate-slowloris:
+	@echo "==> Simulating Slowloris connection holding on local interface..."
+	$(PYTHON) scripts/simulate_slowloris.py
+
+simulate-slowpost:
+	@echo "==> Simulating Slow POST (RUDY) body fragmentation on local interface..."
+	$(PYTHON) scripts/simulate_slowpost.py
+
+simulate-icmp:
+	@echo "==> Simulating ICMP Flood echo request burst on local interface..."
+	$(PYTHON) scripts/simulate_icmp.py
+
+simulate-stealthscan:
+	@echo "==> Simulating Stealth Scan (FIN/XMAS) probes on local interface..."
+	$(PYTHON) scripts/simulate_stealthscan.py
+
+simulate-all:
+	@echo "==> Running NetSentinel Multi-Attack Simulation Tour..."
+	$(PYTHON) scripts/simulate_attack.py --attack all
 
 clean:
 	@echo "==> Cleaning build artifacts..."
@@ -143,14 +175,22 @@ help:
 	@echo " NetSentinel Build & Run Guide"
 	@echo " Repository: https://github.com/monkonthehill/NetSenital"
 	@echo "============================================================"
-	@echo "  make setup        - One-step setup (installs deps, builds & tests)"
-	@echo "  make install-deps - Install system and Python dependencies"
-	@echo "  make build        - Compile the C++ packet sniffer engine"
-	@echo "  make test         - Run AI-generated flow verification tests"
-	@echo "  make dataset      - Generate enterprise multi-attack dataset"
-	@echo "  make train        - Train/refresh ML threat detection models"
-	@echo "  make run          - Launch Web Control Dashboard (port 8000)"
-	@echo "  make cli [IFACE=] - Run CLI sniffer on specific interface"
-	@echo "  make simulate-bruteforce - Launch live brute-force attack simulation"
-	@echo "  make clean        - Remove binaries and temporary files"
+	@echo "  make setup                - One-step setup (installs deps, builds & tests)"
+	@echo "  make install-deps         - Install system and Python dependencies"
+	@echo "  make build                - Compile the C++ packet sniffer engine"
+	@echo "  make test                 - Run AI-generated flow verification tests"
+	@echo "  make dataset              - Generate enterprise multi-attack dataset"
+	@echo "  make train                - Train/refresh ML threat detection models"
+	@echo "  make run                  - Launch Web Control Dashboard (port 8000)"
+	@echo "  make cli [IFACE=]         - Run CLI sniffer on specific interface"
+	@echo "  make simulate-bruteforce  - Simulate HTTP brute-force auth attack"
+	@echo "  make simulate-synflood    - Simulate TCP SYN flood"
+	@echo "  make simulate-portscan    - Simulate TCP port scan sweep"
+	@echo "  make simulate-udpflood    - Simulate UDP datagram flood"
+	@echo "  make simulate-slowloris   - Simulate Slowloris socket exhaustion"
+	@echo "  make simulate-slowpost    - Simulate Slow POST (RUDY) body drip"
+	@echo "  make simulate-icmp        - Simulate ICMP echo burst"
+	@echo "  make simulate-stealthscan - Simulate Stealth FIN/abnormal flags"
+	@echo "  make simulate-all         - Run interactive tour of all simulations"
+	@echo "  make clean                - Remove binaries and temporary files"
 	@echo "============================================================"
