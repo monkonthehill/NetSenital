@@ -114,7 +114,7 @@ run: dashboard
 dashboard: build
 	@echo "==> Launching NetSentinel Web Command & Control Dashboard..."
 	@echo "==> Open your browser at http://localhost:8000"
-	sudo $(PYTHON) web_app.py
+	$(PYTHON) web_app.py
 
 cli: build
 	@echo "==> Launching NetSentinel CLI on interface: $(IFACE)..."

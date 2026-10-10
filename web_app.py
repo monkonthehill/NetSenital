@@ -12,12 +12,29 @@ import threading
 import time
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
-
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-import joblib
-import numpy as np
-import uvicorn
+try:
+    from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+    from fastapi.responses import HTMLResponse
+    import joblib
+    import numpy as np
+    import uvicorn
+except ImportError as exc:
+    print(f"\n[NetSentinel] Missing required Python package: {exc.name}", file=sys.stderr)
+    print(f"[NetSentinel] Current Python binary: {sys.executable}", file=sys.stderr)
+    if os.geteuid() == 0 and "SUDO_USER" in os.environ:
+        print(
+            "\n[Tip] You executed 'sudo python3 web_app.py', which uses the system root Python (/usr/bin/python3).\n"
+            "Instead, run as your normal user — web_app.py automatically elevates with sudo while preserving your Python environment:\n"
+            "   make run    or    python3 web_app.py",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "\nPlease install the required dependencies in your active Python environment:\n"
+            "   pip install -r requirements.txt",
+            file=sys.stderr,
+        )
+    sys.exit(1)
 
 # ── Fast JSON ───────────────────────────────────────────────────────────
 try:
