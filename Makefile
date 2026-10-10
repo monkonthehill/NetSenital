@@ -128,6 +128,10 @@ train:
 	@echo "==> Training Random Forest & XGBoost ML models..."
 	$(PYTHON) scripts/train_model.py
 
+simulate-bruteforce:
+	@echo "==> Simulating Brute Force attack traffic on local interface..."
+	$(PYTHON) scripts/simulate_attack.py --attack brute_force --count 100 --delay 0.05
+
 clean:
 	@echo "==> Cleaning build artifacts..."
 	rm -f $(TARGET) $(TEST_BIN) netsentinal *.o
@@ -143,9 +147,10 @@ help:
 	@echo "  make install-deps - Install system and Python dependencies"
 	@echo "  make build        - Compile the C++ packet sniffer engine"
 	@echo "  make test         - Run AI-generated flow verification tests"
-	@echo "  make dataset      - Generate lightweight multi-attack dataset"
+	@echo "  make dataset      - Generate enterprise multi-attack dataset"
 	@echo "  make train        - Train/refresh ML threat detection models"
 	@echo "  make run          - Launch Web Control Dashboard (port 8000)"
 	@echo "  make cli [IFACE=] - Run CLI sniffer on specific interface"
+	@echo "  make simulate-bruteforce - Launch live brute-force attack simulation"
 	@echo "  make clean        - Remove binaries and temporary files"
 	@echo "============================================================"
